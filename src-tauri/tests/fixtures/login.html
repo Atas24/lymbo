@@ -1,0 +1,8 @@
+<html><body>
+<h1>Sign in</h1>
+<a href="#" style="display:inline-block;padding:4px">Log in with your school</a>
+<form onsubmit="event.preventDefault(); document.title='submitted:'+document.querySelector('#e').value+'|'+document.querySelector('#p').value">
+<input id="e" name="username" type="text" placeholder="NetID">
+<input id="p" type="password" name="password">
+<input type="hidden" name="csrf" value="x">
+<button>Go</button></form></body></html>

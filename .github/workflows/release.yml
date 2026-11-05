@@ -1,0 +1,57 @@
+# Builds the Mac and Windows installers and publishes them as a GitHub release
+# whenever you push a tag like v1.0.0. The app's updater reads latest.json from
+# the newest release, so everyone's Lymbo picks up the update on next launch.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin # one .dmg for Apple Silicon and Intel Macs
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Lymbo ${{ github.ref_name }}"
+          releaseBody: |
+            **Mac:** download the `.dmg`, open it, and drag Lymbo into Applications. The first time, right-click Lymbo and choose **Open**.
+            **Windows:** download the `-setup.exe` and run it. If SmartScreen warns you, click **More info → Run anyway**.
+            You'll need Google Chrome and your own Anthropic API key (console.anthropic.com).
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

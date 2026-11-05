@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { getVersion } from "@tauri-apps/api/app";
 import { api, errText, fmtDuration, fmtUsd } from "./lib/api";
 import { bus } from "./lib/bus";
 import { worthTailoring } from "./lib/keywords";
@@ -74,6 +77,32 @@ export default function App() {
     refreshKey();
     refreshSession();
   }, [refreshKey, refreshSession]);
+
+  // Look for a newer Lymbo on GitHub when the app opens. Your data isn't touched by updates.
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+    check()
+      .then((update) => {
+        if (!update) return;
+        notify({
+          text: `Lymbo ${update.version} is available.`,
+          action: {
+            label: "Update & restart",
+            run: async () => {
+              notify({ text: "Downloading the update…" });
+              try {
+                await update.downloadAndInstall();
+                await relaunch();
+              } catch (e) {
+                notify({ text: `Update failed: ${errText(e)}`, tone: "error" });
+              }
+            },
+          },
+        });
+      })
+      .catch(() => {}); // offline, or no release yet: just skip
+  }, [notify]);
 
   // Tick the session timer.
   useEffect(() => {
@@ -157,7 +186,7 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <div className="mt-auto px-2 text-xs text-muted">v0.1 · data stays on this computer</div>
+          <div className="mt-auto px-2 text-xs text-muted">{version && `v${version} · `}data stays on this computer</div>
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col">

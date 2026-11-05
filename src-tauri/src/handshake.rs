@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn login_page_fill() {
         let Some((_b, tab)) = browser() else { return };
-        let dir = "/tmp/claude-0/mock";
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
         tab.navigate_to(&format!("file://{dir}/login.html")).unwrap().wait_until_navigated().unwrap();
         let f: Fields = serde_json::from_str(&eval_string(&tab, FIND_FIELDS_JS).unwrap()).unwrap();
         assert!(f.pw && f.user && !f.user_filled);
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn job_links() {
         let Some((_b, tab)) = browser() else { return };
-        tab.navigate_to("file:///tmp/claude-0/mock/jobs.html").unwrap().wait_until_navigated().unwrap();
+        tab.navigate_to(concat!("file://", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/jobs.html")).unwrap().wait_until_navigated().unwrap();
         let cancel = AtomicBool::new(false);
         let links = Handshake::collect_links(&tab, &cancel).unwrap();
         let ids: Vec<_> = links.iter().map(|l| l.id.as_str()).collect();

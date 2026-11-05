@@ -1,77 +1,92 @@
 # Lymbo
 
-Desktop app for an assisted job search. **KASPR** finds jobs that fit you, **SONNY** helps tailor your resume and cover letters, and the **Control Room** keeps your resumes, application timeline and stats. Everything is stored on your computer. The agents use your own Anthropic API key, which is kept in your system keychain.
+A desktop app that helps you find and apply to jobs on Handshake, with two assistants:
 
-## What works in v0.1
+- **KASPR** signs in to Handshake for you, searches for jobs, and goes through them one at a time. It scores each one against your resume and where you want to work. You always click Apply yourself.
+- **SONNY** shows which of a job's keywords your resume covers and which it's missing. It suggests specific edits and drafts cover letters. It never changes your resume on its own.
 
-- **Control Room:** resume library (newest one is "current"), application timeline with status, saved cover letters, stats (jobs applied, SONNY workshops, time applying, estimated API spend), and the **KILL SWITCH**.
-- **Sessions:** the agents only work during a session you start. The kill switch (or End session) stops the session right away. Any agent reply still on its way is thrown out.
-- **KASPR + Handshake:** you give KASPR your Handshake login (school sign-in or Handshake password). It's stored in your Keychain. KASPR opens a Chrome window, signs you in, asks where you want to work, searches Handshake, and goes through jobs one at a time, scoring each against your resume and location. You open the job and click Apply yourself, then tell KASPR you applied.
-  - If your school uses Duo or other 2-factor, KASPR stops and you approve it, then click **I'm signed in**.
-  - The first time Handshake sends KASPR to your school's login page, it asks before typing your login there.
-  - KASPR pauses a few seconds between page loads, only browses joinhandshake.com, and never clicks Apply or Submit.
-  - If it can't find job listings (Handshake changes its pages sometimes), search in the Chrome window yourself and click **read that page**.
-  - The Chrome window starts fresh every time, so you're signed in again each time you open the app.
-  - You can still paste a job by hand under **Paste a job instead**.
-- **SONNY:** pops up if your resume should be tailored for a job KASPR recommended. In the workshop it lists missing keywords and suggests specific edits (it never edits for you), and drafts cover letters on request.
-- **Settings:** add/replace/remove your API key (checked with Anthropic before it's saved), pick the model, set a per-session spending limit, and set token prices for cost estimates.
+Everything else lives in the **Control Room**: your resumes (uploaded as PDFs), the jobs you've applied to and their status, saved cover letters, and a kill switch that stops everything immediately.
 
-**Needs testing on a real Handshake account:** the login steps and job search were tested against mock pages, not the live site. If something doesn't match Handshake's real pages, KASPR stops and hands you control instead of guessing. Tell Claude what happened and it can be adjusted.
+## Download
 
-## Run it on your Mac (first time)
+Get the latest version from the [Releases page](https://github.com/Atas24/lymbo/releases/latest).
 
-You need Xcode Command Line Tools, Rust, Node, and Google Chrome (KASPR drives it for Handshake):
+- **Mac:** download the `.dmg`, open it, and drag Lymbo into Applications. The first time, right-click Lymbo and choose **Open** (the app isn't signed by Apple, so macOS asks once).
+- **Windows:** download the `-setup.exe` and run it. If SmartScreen warns you, click **More info → Run anyway**.
+
+Lymbo updates itself. When a new version is out, it offers to install it the next time you open the app. Your data stays put.
+
+## What you need
+
+- **Google Chrome.** KASPR uses a Chrome window for Handshake.
+- **An Anthropic API key** from [console.anthropic.com](https://console.anthropic.com), with a few dollars of credit. You don't need a Claude subscription. You pay Anthropic directly for what the assistants use, usually about a cent or less per job. Lymbo shows the running cost and lets you set a spending limit.
+- **A Handshake account.**
+
+## Getting started
+
+1. Open **Settings** and paste your API key.
+2. Upload your resume PDF in the **Control Room**.
+3. Click **Start session**, open **KASPR**, save your Handshake login, and click **Connect**.
+4. Tell KASPR where you want to work, search, and go through the jobs.
+
+If your school uses Duo or another 2-factor step, approve it when Chrome asks, then click **I'm signed in**.
+
+## Privacy
+
+- Your resumes, applications and settings are stored only on your computer.
+- Your API key and Handshake login are kept in your system keychain (Keychain on Mac, Credential Manager on Windows). Your login is only typed into Handshake, or into your school's sign-in page after you approve it. It's never sent to the AI.
+- When KASPR or SONNY needs the AI, Lymbo sends only what that step needs (your resume text and the job description) to Anthropic.
+- Keyword matching runs on your computer and isn't sent anywhere.
+
+## How KASPR behaves on Handshake
+
+- It only works while you have a session running, never in the background.
+- It waits a few seconds between pages, like a person would.
+- It only browses joinhandshake.com and only reads what you could see yourself.
+- It never clicks Apply or Submit.
+- If a page doesn't look the way it expects, it stops and hands control back to you instead of guessing.
+
+---
+
+## For developers
+
+Built with Tauri 2 (Rust), React + TypeScript, Tailwind, Anime.js and SQLite.
+
+### Run from source
+
+You need Rust (rustup.rs), Node.js LTS, and Google Chrome. On a Mac you also need Xcode Command Line Tools, with the license accepted (`sudo xcodebuild -license accept`).
 
 ```bash
-xcode-select --install
-curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
-brew install node        # or the LTS installer from nodejs.org
-```
-
-Then, in this folder:
-
-```bash
-cd ~/Desktop/lymbo
 npm install
 npm run tauri dev
 ```
 
-The first `tauri dev` compiles everything and takes a few minutes. After that it's quick, and the window reloads when you edit the React code.
+### Release a new version
 
-Once it opens:
+1. Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
+2. Commit, then tag and push:
+   ```bash
+   git tag v1.0.1
+   git push && git push --tags
+   ```
+3. GitHub Actions builds the Mac and Windows installers and publishes the release. Installed copies pick it up on their next launch.
 
-1. Go to **Settings** and paste your Anthropic API key (from console.anthropic.com).
-2. Check the **model name** and prices. The default is `claude-sonnet-4-5`. Change it if Anthropic has a newer model you'd rather use.
-3. Add your resume in the **Control Room** (paste the text).
-4. Click **Start session**, then open **KASPR**, save your Handshake login, and click **Connect**.
+Updates are signed with a private key stored as the GitHub secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. To create them the first time, run `scripts/setup-updates.sh`.
 
-## Build an installer
-
-```bash
-npm run tauri build
-```
-
-The `.dmg` and `.app` end up in `src-tauri/target/release/bundle/`. Windows installers have to be built on Windows. The easiest way is a GitHub Actions workflow, which we can add later.
-
-The app isn't code-signed, so macOS will warn that the developer can't be verified. Right-click the app and choose **Open** to get past it.
-
-## Where things are
+### Project layout
 
 ```
-src/                     React + TypeScript UI
-  App.tsx                app shell, session bar, SONNY's listener for KASPR handoffs
-  pages/                 ControlRoom, KasprPage, SonnyPage, SettingsPage
-  components/Sprites.tsx pixel-art KASPR and SONNY (edit the grids to redraw them)
-  lib/prompts.ts         what each agent is told — tune these
-  lib/agents.ts          KASPR/SONNY calls
-  lib/bus.ts             structured messages between agents
-src-tauri/src/           Rust backend
-  commands.rs            everything the UI can call
-  db.rs                  SQLite tables (resumes, applications, cover_letters, kv)
-  keys.rs                API key + Handshake login in Keychain / Credential Manager
-  ai.rs                  shared Anthropic client used by both agents
-  handshake.rs           KASPR's Chrome control: login, search, reading jobs (selectors live here)
-  session.rs             session state for the kill switch and cost tracking
+src/                       React UI
+  pages/                   Control Room, KASPR, SONNY, Settings
+  components/              pixel-art agents, PDF viewer, keyword bar, kill switch
+  lib/keywords.ts          local keyword matching (no AI)
+  lib/prompts.ts           what each assistant is told
+  lib/agents.ts            KASPR and SONNY's AI calls
+src-tauri/src/
+  handshake.rs             Chrome control: sign-in, search, reading job pages
+  ai.rs                    Anthropic client
+  commands.rs              everything the UI can call
+  db.rs                    SQLite: resumes, applications, cover letters, cache
+  keys.rs                  API key and Handshake login in the system keychain
+.github/workflows/         release builds
 ```
-
-Your data lives in `~/Library/Application Support/com.lymbo.app/lymbo.db`, so updating the app doesn't touch it.

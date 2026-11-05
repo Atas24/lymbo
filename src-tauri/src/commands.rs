@@ -488,7 +488,7 @@ pub async fn handshake_disconnect(state: State<'_, AppState>) -> Result<(), Stri
 mod tests {
     #[test]
     fn reads_a_resume_pdf() {
-        let Ok(bytes) = std::fs::read("/tmp/claude-0/mock/resume.pdf") else { return };
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/resume.pdf")).unwrap();
         let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
         assert!(text.contains("Python"), "got: {text}");
     }
