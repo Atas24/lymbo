@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0c0c0f;
+  --color-panel: #15151a;
+  --color-panel2: #1c1c23;
+  --color-line: #2a2a33;
+  --color-muted: #8b8b98;
+  --color-accent: #ff5a4e;
+  --color-kaspr: #f5c542;
+  --color-sonny: #5fe0a3;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: #ececf1;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Pixel art stays crisp at any size. */
+.pixel { image-rendering: pixelated; shape-rendering: crispEdges; }
+/* Let anime.js rotate/flip SVG parts around their own centers. */
+.pixel g { transform-box: fill-box; transform-origin: center; }
+
+.btn {
+  @apply rounded-md border border-line bg-panel2 px-3 py-1.5 text-sm font-medium transition
+         hover:border-muted disabled:cursor-not-allowed disabled:opacity-40;
+}
+.btn-primary { @apply border-accent bg-accent text-ink hover:brightness-110; }
+.input {
+  @apply w-full rounded-md border border-line bg-ink px-3 py-2 text-sm outline-none
+         placeholder:text-muted focus:border-muted;
+}
+.card { @apply rounded-xl border border-line bg-panel p-5; }
+.label { @apply mb-1 block text-xs font-medium uppercase tracking-wider text-muted; }
