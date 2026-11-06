@@ -29,7 +29,7 @@ Lymbo updates itself. When a new version is out, it offers to install it the nex
 2. Upload your resume in the **Control Room**. Use the Word file (.docx) so SONNY can make tailored versions of it. A PDF works too, but then SONNY can't make versions.
 3. Click **Start session**, open **KASPR**, save your Handshake login, and click **Connect**.
 4. Pick where you want to work and whether you want internships or full-time jobs, set how specific KASPR should be, and hit **Find jobs**.
-5. Go through the jobs with **Next planet**. If none of your resumes fit a job, click **Work with SONNY**.
+5. Go through the jobs with **Next planet**. If none of your resumes fit a job, click **Work with SONNY**. To tailor your resume for one specific posting, click **Work with SONNY on this job**.
 
 New to Lymbo? The first time you open it, you can take a short tour that walks through each screen. You can replay it anytime from **Settings**.
 

@@ -67,7 +67,7 @@ export const TOUR: TourStep[] = [
   {
     page: "kaspr", target: "cockpit",
     title: "The cockpit",
-    body: "KASPR flies you through the jobs one at a time. Each planet is a job; the dashboard shows which resume to use and how well it matches. Hit Next planet (or the → key) to fly to the next one. If none of your resumes fit, click Work with SONNY.",
+    body: "KASPR flies you through the jobs one at a time. Each planet is a job; the dashboard shows which resume to use and how well it matches. Hit Next planet (or the → key) to fly to the next one. If none of your resumes fit, click Work with SONNY. To tailor your resume for just one posting, use Work with SONNY on this job.",
   },
   {
     page: "sonny", target: "versions",

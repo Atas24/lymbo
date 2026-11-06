@@ -33,6 +33,14 @@ const GROUPS: string[][] = [
   ["Product management", "product roadmap", "roadmap"], ["Project management"], ["Stakeholder management", "stakeholders", "cross-functional"],
   ["CRM", "salesforce", "hubspot"], ["SEO"], ["Google Analytics"], ["Marketing analytics"], ["Business intelligence"],
   ["KPIs", "kpi", "metrics"], ["Reporting", "reports"], ["Consulting"], ["Operations"], ["Supply chain"], ["Risk analysis", "risk management"],
+  ["PowerPoint", "slide decks", "pitch decks"], ["Microsoft Word"], ["Microsoft Office", "ms office", "microsoft 365", "office 365"],
+  ["Financial analysis", "financial statements", "financial statement analysis"], ["Underwriting"], ["Due diligence"], ["Real estate"],
+  ["Investment analysis", "investment memos", "investment memo", "investment thesis"], ["Mergers and acquisitions", "m&a"],
+  ["Corporate finance"], ["Private equity"], ["Investment banking"], ["Equity research"], ["Portfolio management"],
+  ["Bloomberg", "bloomberg terminal"], ["Capital IQ", "capiq"], ["Economics", "economic analysis", "econometrics"], ["Finance"],
+  ["Competitive analysis", "competitor analysis", "competitive landscape"], ["Market sizing"], ["Business development"],
+  ["Negotiation", "negotiating"], ["Social media", "social media marketing"], ["Content marketing", "content creation"], ["Copywriting"],
+  ["Process improvement", "process optimization"], ["Strategy", "strategic planning", "business strategy"],
   // research / general
   ["Research", "research experience"], ["Literature review"], ["Technical writing", "documentation"], ["Presentations", "presenting", "public speaking"],
   ["Communication", "communication skills", "written and verbal"], ["Teamwork", "collaboration", "collaborative", "team player"],
@@ -226,7 +234,8 @@ export function clusterJobs(jobs: JobKeywords[], maxClusters = 4): KeywordCluste
 export function clusterFitsVersion(cluster: KeywordCluster, versionKeywords: Record<string, number>): number {
   const a = new Set(Object.keys(cluster.counts));
   const b = new Set(Object.keys(versionKeywords));
-  if (!a.size || !b.size) return 0;
+  // Too few keywords to say anything (a posting KASPR barely read): never a fit.
+  if (a.size < 3 || !b.size) return 0;
   let inter = 0;
   for (const k of a) if (b.has(k)) inter++;
   return inter / new Set([...a, ...b]).size;

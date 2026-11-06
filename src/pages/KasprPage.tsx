@@ -47,6 +47,9 @@ const reader = {
   approved: [] as ResumeVersion[],
 };
 
+/** KASPR read too little of the posting to judge it (under 3 skills found). */
+const thin = (m: BatchJob["match"]) => !m || m.covered.length + m.missing.length < 3;
+
 function fromLink(link: JobLink): BatchJob {
   // Listing text is usually: title / company / location / extra lines.
   const lines = link.text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -110,7 +113,7 @@ export default function KasprPage() {
   useEffect(() => {
     if (reader.needVersions && kaspr.reading === "idle" && kaspr.jobs.some((j) => j.read)) {
       reader.needVersions = false;
-      makeVersions();
+      makeVersions(true);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -241,9 +244,8 @@ export default function KasprPage() {
         // Already have a resume version that fits? Use it (local, free).
         let versionId: number | null = null, versionCoverage: number | null = null;
         const best = rankVersions(page.text, reader.approved)[0];
-        if (best) {
-          const total = best.match.covered.length + best.match.missing.length;
-          if (best.match.coverage >= VERSION_FIT || total < 3) {
+        if (best && !thin(match)) {
+          if (best.match.coverage >= VERSION_FIT) {
             versionId = best.version.id;
             versionCoverage = best.match.coverage;
             api.versionLearn(best.version.id, id, keywordsIn(page.text)).catch(() => {});
@@ -251,7 +253,8 @@ export default function KasprPage() {
         }
         updateJobs((jobs) => jobs.map((x) => (x.link.id === id
           ? { ...x, read: true, readAt: Date.now(), pageText: page.text, match, versionId, versionCoverage,
-              job: { ...x.job, url: page.url, description: page.text.slice(0, 1500) } }
+              job: { ...x.job, url: page.url, description: page.text.slice(0, 1500),
+                title: page.title || x.job.title, company: page.company || x.job.company } }
           : x)));
         readSoFar++;
         if (!reader.madeEarly && readSoFar >= 6) {
@@ -275,7 +278,7 @@ export default function KasprPage() {
     setTimeout(() => {
       if (reader.needVersions && jobsRef.current.length) {
         reader.needVersions = false;
-        makeVersions();
+        makeVersions(true);
       }
     }, 300);
   };
@@ -366,7 +369,7 @@ export default function KasprPage() {
   // ---------- resume versions for the batch ----------
 
   /** Picks a version for each read job that passes your filters; asks SONNY only for new kinds of jobs. */
-  const makeVersionsInner = async () => {
+  const makeVersionsInner = async (final: boolean, forJob?: string) => {
     const r = await currentResume();
     if (!r) return;
     if (!r.has_docx) {
@@ -376,8 +379,14 @@ export default function KasprPage() {
       }
       return;
     }
-    const jobs = jobsRef.current.filter((j) => j.read && shows(j) && !j.versionId);
-    if (!jobs.length) return;
+    const jobs = jobsRef.current.filter((j) => j.read && shows(j) && (!j.versionId || j.link.id === forJob) && !thin(j.match));
+    if (!jobs.length) {
+      const read = jobsRef.current.filter((j) => j.read && shows(j));
+      if (final && !forJob && read.some((j) => !thin(j.match))) {
+        notify({ from: "SONNY", text: "Every job in this batch already has a resume version that fits." });
+      }
+      return;
+    }
     setSonnyBusy(true);
     const all = (await api.versions()).filter((v) => v.base_resume_id === r.id);
     const approved = all.filter((v) => v.status === "approved");
@@ -387,8 +396,7 @@ export default function KasprPage() {
 
     for (const j of jobs) {
       const best = rankVersions(j.pageText, approved)[0];
-      const total = best ? best.match.covered.length + best.match.missing.length : 0;
-      if (best && (best.match.coverage >= VERSION_FIT || total < 3)) {
+      if (best && best.match.coverage >= VERSION_FIT) {
         assigned.set(j.link.id, { versionId: best.version.id, coverage: best.match.coverage });
         await learn(best.version.id, j);
       } else unmatched.push(j);
@@ -399,15 +407,27 @@ export default function KasprPage() {
       const maxNew = Math.max(0, Math.min(4, 6 - all.length));
       const clusters = clusterJobs(unmatched.map((j) => ({ id: j.link.id, keywords: keywordsIn(j.pageText) })), Math.max(1, maxNew || 1));
       const fresh: KeywordCluster[] = [];
+      let full = 0;
       for (const c of clusters) {
-        const fit = all.map((v) => ({ v, score: clusterFitsVersion(c, v.keywords) })).sort((a, b) => b.score - a.score)[0];
-        if (fit && (fit.score >= 0.5 || maxNew === 0)) {
+        // When you ask about one job, don't hand it back the version that didn't fit it.
+        const skip = forJob && c.jobIds.includes(forJob) ? byId.get(forJob)?.versionId : null;
+        const fit = all.filter((v) => v.id !== skip)
+          .map((v) => ({ v, score: clusterFitsVersion(c, v.keywords) })).sort((a, b) => b.score - a.score)[0];
+        if (fit && fit.score >= 0.5) {
           for (const id of c.jobIds) {
             const j = byId.get(id)!;
             assigned.set(id, { versionId: fit.v.id, coverage: fit.v.text ? matchKeywords(j.pageText, fit.v.text).coverage : null });
             await learn(fit.v.id, j);
           }
-        } else fresh.push(c);
+        } else if (maxNew > 0) fresh.push(c);
+        else full += c.jobIds.length;
+      }
+      if (full) {
+        notify({
+          from: "SONNY",
+          text: `${full} job${full > 1 ? "s" : ""} need a new resume version, but you already have ${all.length}, the most I keep. Delete one you don't use in the Control Room and I'll make a new one.`,
+          action: { label: "Open Control Room", run: () => go("control") },
+        });
       }
       if (fresh.length) {
         setBusy("SONNY", true);
@@ -427,6 +447,9 @@ export default function KasprPage() {
               baseResumeId: r.id, label: g.label, summary: g.summary, edits: g.edits, jobIds: c.jobIds, keywords: Object.keys(c.counts),
             });
             for (const id of c.jobIds) assigned.set(id, { versionId: vid, coverage: null });
+          }
+          if (!written.length) {
+            notify({ from: "SONNY", text: "I looked at this batch but couldn't find changes worth making to your resume. Try Work with SONNY on a single job.", tone: "error" });
           }
           if (written.length) {
             notify({
@@ -448,9 +471,9 @@ export default function KasprPage() {
     }));
     bumpData();
   };
-  const makeVersions = async () => {
+  const makeVersions = async (final = false, forJob?: string) => {
     try {
-      await makeVersionsInner();
+      await makeVersionsInner(final, forJob);
     } finally {
       setSonnyBusy(false);
     }
@@ -480,14 +503,20 @@ export default function KasprPage() {
   /** No good resume for this job: let SONNY make one (or open the job in SONNY). */
   const workWithSonny = async (j: BatchJob) => {
     const v = versions.find((x) => x.id === j.versionId);
-    if (v?.status === "pending" || !resume?.has_docx) {
-      if (!v) setWorkshopJob(j.job);
+    if (v?.status === "pending" || !resume?.has_docx || thin(j.match)) {
+      if (!v) setWorkshopJob({ ...j.job, description: j.pageText || j.job.description });
       else setWorkshopJob(null);
       go("sonny");
       return;
     }
-    await task("SONNY is drafting a resume for jobs like this…", makeVersions);
+    await task("SONNY is drafting a resume for jobs like this…", () => makeVersions(false, j.link.id));
     setWorkshopJob(null);
+    go("sonny");
+  };
+
+  /** Opens SONNY's one-job workshop with this posting filled in, whatever resume KASPR picked. */
+  const sonnyOnJob = (j: BatchJob) => {
+    setWorkshopJob({ ...j.job, description: j.pageText || j.job.description });
     go("sonny");
   };
 
@@ -501,11 +530,13 @@ export default function KasprPage() {
       </button>
     );
     if (version?.status === "approved") {
+      const weak = job.versionCoverage !== null && job.versionCoverage < VERSION_FIT;
       return (
         <>
           <div className="text-lg font-semibold text-sonny">{version.label}</div>
           {job.versionCoverage !== null && <div className="text-xs text-muted">Covers {Math.round(job.versionCoverage * 100)}% of this job's keywords</div>}
-          <div className="mt-auto flex gap-2">
+          <div className="mt-auto flex flex-wrap gap-2">
+            {weak && sonnyBtn}
             {version.has_pdf && <button className="btn text-xs" onClick={() => api.versionOpen(version.id, "pdf").catch(err)}>Open PDF</button>}
             <button className="btn text-xs" onClick={() => api.versionOpen(version.id, "docx").catch(err)}>Open Word file</button>
           </div>
@@ -521,6 +552,15 @@ export default function KasprPage() {
       );
     }
     if (sonnyBusy) return <div className="text-sm text-muted">SONNY is drafting resumes for this batch…</div>;
+    if (thin(job.match)) {
+      return (
+        <>
+          <div className="text-sm">KASPR couldn't read enough of this posting to pick a resume.</div>
+          <div className="text-xs text-muted">Open it in Chrome to check it yourself, or paste the description into SONNY.</div>
+          <div className="mt-auto">{sonnyBtn}</div>
+        </>
+      );
+    }
     const cov = job.match?.coverage ?? 0;
     if (resume && cov >= VERSION_FIT) {
       return (
@@ -547,6 +587,7 @@ export default function KasprPage() {
       <>
         <button className="btn btn-primary text-xs" disabled={busy} onClick={openToApply}>Open in Chrome to apply</button>
         <button className="btn text-xs" disabled={busy} onClick={() => setConfirming(true)}>I applied</button>
+        <button className="btn text-xs" onClick={() => sonnyOnJob(job)}>Work with SONNY on this job</button>
       </>
     ) : (
       <span className="flex flex-wrap items-center gap-2 text-sm">

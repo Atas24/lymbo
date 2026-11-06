@@ -77,7 +77,7 @@ export const api = {
   hsCheck: () => invoke<boolean>("handshake_check"),
   hsSearch: (query: string) => invoke<JobLink[]>("handshake_search", { query }),
   hsLinksOnPage: () => invoke<JobLink[]>("handshake_links_on_page"),
-  hsReadJob: (url: string) => invoke<{ url: string; text: string }>("handshake_read_job", { url }),
+  hsReadJob: (url: string) => invoke<{ url: string; title: string; company: string; text: string }>("handshake_read_job", { url }),
   hsOpen: (url: string) => invoke<void>("handshake_open", { url }),
   hsDisconnect: () => invoke<void>("handshake_disconnect"),
 };
