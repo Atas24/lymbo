@@ -1,3 +1,6 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { leave } from "../lib/motion";
+import { SplitTitle } from "../components/SplitTitle";
 import { useEffect, useRef, useState } from "react";
 import { animate, stagger } from "animejs";
 import { api, errText, fmtDuration, fmtUsd } from "../lib/api";
@@ -14,11 +17,23 @@ const STATUS_COLOR: Record<string, string> = {
   withdrawn: "bg-muted",
 };
 
-function StatCard({ label, value }: { label: string; value: string }) {
+/** A stat whose number counts up when it appears or changes. */
+function StatCard({ label, value, format }: { label: string; value: number; format: (n: number) => string }) {
+  const [shown, setShown] = useState(format(0));
+  const from = useRef(0);
+  useEffect(() => {
+    const obj = { n: from.current };
+    const a = animate(obj, {
+      n: value, duration: 900, ease: "outExpo",
+      onUpdate: () => setShown(format(obj.n)),
+      onComplete: () => { from.current = value; setShown(format(value)); },
+    });
+    return () => void a.pause();
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="stat card opacity-0">
       <div className="label">{label}</div>
-      <div className="font-mono text-3xl font-semibold">{value}</div>
+      <div className="font-mono text-3xl font-semibold">{shown}</div>
     </div>
   );
 }
@@ -73,22 +88,43 @@ export default function ControlRoom() {
 
   const uploadPdf = async (file: File | undefined) => {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      notify({ text: "Pick a PDF file.", tone: "error" });
+    const name = file.name.toLowerCase();
+    const isDocx = name.endsWith(".docx");
+    if (!isDocx && !name.endsWith(".pdf")) {
+      notify({ text: "Pick a Word file (.docx) or a PDF.", tone: "error" });
       return;
     }
     setUploading(true);
     try {
       const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-      await api.resumeUploadPdf(file.name, bytes);
+      if (isDocx) await api.resumeUploadDocx(file.name, bytes);
+      else await api.resumeUploadPdf(file.name, bytes);
       setShowAdd(false);
       bumpData();
-      notify({ text: `${file.name} saved as your current resume. Click it below to check the text came through right.`, tone: "success" });
+      notify({
+        text: isDocx
+          ? `${file.name} is now your current resume. SONNY can make tailored versions of it.`
+          : `${file.name} saved as your current resume. Upload the Word (.docx) version too if you want SONNY to make tailored versions.`,
+        tone: "success",
+      });
     } catch (e) {
       notify({ text: errText(e), tone: "error" });
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  /** Animates the row away, then deletes it. */
+  const remove = async (rowId: string, del: () => Promise<void>, done: string) => {
+    try {
+      await leave(document.getElementById(rowId));
+      await del();
+      bumpData();
+      notify({ text: done });
+    } catch (e) {
+      notify({ text: errText(e), tone: "error" });
+      bumpData();
     }
   };
 
@@ -105,26 +141,26 @@ export default function ControlRoom() {
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <div className="flex items-start justify-between gap-6">
         <div>
-          <h1 className="text-2xl font-semibold">Control Room</h1>
+          <SplitTitle text="Control Room" />
           <p className="text-sm text-muted">Everything KASPR and SONNY know about you lives here, on this computer.</p>
         </div>
       </div>
 
       <div className="grid grid-cols-[1fr_auto] gap-6">
-        <div ref={statsRef} className="grid grid-cols-2 gap-4">
-          <StatCard label="Jobs applied" value={String(stats?.applied_count ?? 0)} />
-          <StatCard label="SONNY workshops" value={String(stats?.workshop_sessions ?? 0)} />
-          <StatCard label="Time applying" value={fmtDuration(stats?.seconds_applying ?? 0)} />
-          <StatCard label="API spend (est.)" value={fmtUsd(stats?.lifetime_cost_usd ?? 0)} />
+        <div ref={statsRef} data-tour="stats" className="grid grid-cols-2 gap-4">
+          <StatCard label="Jobs applied" value={stats?.applied_count ?? 0} format={(n) => String(Math.round(n))} />
+          <StatCard label="SONNY workshops" value={stats?.workshop_sessions ?? 0} format={(n) => String(Math.round(n))} />
+          <StatCard label="Time applying" value={stats?.seconds_applying ?? 0} format={(n) => fmtDuration(n)} />
+          <StatCard label="API spend (est.)" value={stats?.lifetime_cost_usd ?? 0} format={fmtUsd} />
         </div>
-        <div className="card flex items-center justify-center px-8">
+        <div data-tour="killswitch" className="card flex items-center justify-center px-8">
           <KillSwitch />
         </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Resume library */}
-        <section className="card">
+        <section data-tour="resumes" className="card">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-semibold">Resumes</h2>
             <button className="btn" onClick={() => setShowAdd((v) => !v)}>
@@ -144,11 +180,11 @@ export default function ControlRoom() {
                   dragging ? "border-sonny bg-sonny/5" : "border-line hover:border-muted"
                 }`}
               >
-                <span className="font-mono text-2xl">{uploading ? "…" : "PDF"}</span>
-                <span className="text-sm">{uploading ? "Reading your resume…" : "Drop your resume PDF here, or click to choose"}</span>
-                <span className="text-xs text-muted">The newest upload becomes your current resume</span>
+                <span className="font-mono text-2xl">{uploading ? "…" : "DOCX · PDF"}</span>
+                <span className="text-sm">{uploading ? "Reading your resume…" : "Drop your resume here, or click to choose"}</span>
+                <span className="text-xs text-muted">Word (.docx) lets SONNY make tailored versions that keep your formatting</span>
               </button>
-              <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={(e) => uploadPdf(e.target.files?.[0])} />
+              <input ref={fileRef} type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden" onChange={(e) => uploadPdf(e.target.files?.[0])} />
               <button className="self-start text-xs text-muted underline" onClick={() => setPasteMode(true)}>Paste text instead</button>
             </div>
           )}
@@ -163,23 +199,26 @@ export default function ControlRoom() {
             </div>
           )}
           {resumes.length === 0 && !showAdd && (
-            <p className="text-sm text-muted">No resume yet. Upload your resume PDF so KASPR can judge which jobs fit you.</p>
+            <p className="text-sm text-muted">No resume yet. Upload your resume (ideally the Word .docx) so KASPR can judge which jobs fit you.</p>
           )}
           <ul className="flex flex-col gap-2">
             {resumes.map((r) => (
-              <li key={r.id} className="rounded-lg border border-line p-3">
+              <li key={r.id} id={`res-${r.id}`} className="rounded-lg border border-line p-3">
                 <div className="flex items-center justify-between gap-2">
                   <button className="text-left" onClick={() => setOpen(open === `r${r.id}` ? null : `r${r.id}`)}>
                     <div className="text-sm font-medium">{r.label}</div>
                     <div className="text-xs text-muted">{r.created_at}</div>
                   </button>
-                  {r.is_current ? (
-                    <span className="rounded bg-sonny/15 px-2 py-0.5 font-mono text-[10px] text-sonny">CURRENT</span>
-                  ) : (
-                    <button className="btn text-xs" onClick={() => api.resumeSetCurrent(r.id).then(bumpData)}>
-                      Make current
-                    </button>
-                  )}
+                  <span className="flex items-center gap-2">
+                    {r.is_current ? (
+                      <span className="rounded bg-sonny/15 px-2 py-0.5 font-mono text-[10px] text-sonny">CURRENT</span>
+                    ) : (
+                      <button className="btn text-xs" onClick={() => api.resumeSetCurrent(r.id).then(bumpData)}>
+                        Make current
+                      </button>
+                    )}
+                    <DeleteButton what="this resume and its versions" onConfirm={() => remove(`res-${r.id}`, () => api.resumeDelete(r.id), "Resume deleted.")} />
+                  </span>
                 </div>
                 {open === `r${r.id}` && (
                   <div className="mt-3">
@@ -196,7 +235,7 @@ export default function ControlRoom() {
         </section>
 
         {/* Application timeline */}
-        <section className="card">
+        <section data-tour="timeline" className="card">
           <h2 className="mb-4 font-semibold">Application timeline</h2>
           {apps.length === 0 && (
             <p className="text-sm text-muted">Nothing yet. When you tell KASPR you applied, it shows up here.</p>
@@ -233,11 +272,14 @@ export default function ControlRoom() {
         {letters.length === 0 && <p className="text-sm text-muted">Cover letters you save from SONNY land here.</p>}
         <ul className="flex flex-col gap-2">
           {letters.map((l) => (
-            <li key={l.id} className="rounded-lg border border-line p-3">
-              <button className="w-full text-left" onClick={() => setOpen(open === `c${l.id}` ? null : `c${l.id}`)}>
-                <span className="text-sm font-medium">{l.company}</span>
-                <span className="ml-2 text-xs text-muted">{l.created_at}</span>
-              </button>
+            <li key={l.id} id={`cl-${l.id}`} className="rounded-lg border border-line p-3">
+              <div className="flex items-center gap-2">
+                <button className="flex-1 text-left" onClick={() => setOpen(open === `c${l.id}` ? null : `c${l.id}`)}>
+                  <span className="text-sm font-medium">{l.company}</span>
+                  <span className="ml-2 text-xs text-muted">{l.created_at}</span>
+                </button>
+                <DeleteButton what="this cover letter" onConfirm={() => remove(`cl-${l.id}`, () => api.coverLetterDelete(l.id), "Cover letter deleted.")} />
+              </div>
               {open === `c${l.id}` && (
                 <pre className="mt-3 whitespace-pre-wrap font-sans text-sm text-muted">{l.content}</pre>
               )}

@@ -1,6 +1,6 @@
 [package]
 name = "lymbo"
-version = "1.0.0"
+version = "2.0.0"
 description = "Lymbo - assisted job search desktop app"
 edition = "2021"
 
@@ -25,3 +25,4 @@ headless_chrome = { version = "1.0.22", default-features = false }
 pdf-extract = "0.12.1"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+zip = { version = "9", default-features = false, features = ["deflate"] }

@@ -18,6 +18,8 @@ export interface Settings {
 
 export interface Resume {
   id: number;
+  has_docx: boolean;
+  has_pdf: boolean;
   label: string;
   content: string;
   is_current: boolean;
@@ -87,3 +89,37 @@ export const APPLICATION_STATUSES = [
   "rejected",
   "withdrawn",
 ] as const;
+
+/** One change SONNY proposes to a line (paragraph) of the .docx resume. */
+export interface Edit {
+  p: number;
+  op: "replace" | "insert_after" | "delete" | "move_after";
+  text?: string;
+  /** For move_after: the line this one goes right after. */
+  after?: number;
+  why?: string;
+}
+
+export interface ResumeLine {
+  p: number;
+  text: string;
+  locked: boolean;
+}
+
+/** A tailored copy of the .docx resume for one kind of role. */
+export interface ResumeVersion {
+  id: number;
+  base_resume_id: number;
+  label: string;
+  summary: string;
+  status: "pending" | "approved";
+  edits: Edit[];
+  job_ids: string[];
+  /** keyword -> how many matched jobs asked for it */
+  keywords: Record<string, number>;
+  text: string;
+  created_at: string;
+  applied: number;
+  interviewing: number;
+  has_pdf: boolean;
+}

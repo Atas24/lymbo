@@ -1,10 +1,11 @@
+import { SplitTitle } from "../components/SplitTitle";
 import { useEffect, useState } from "react";
 import { api, errText } from "../lib/api";
 import { useApp } from "../lib/context";
 import type { Settings } from "../lib/types";
 
 export default function SettingsPage() {
-  const { hasKey, refreshKey, notify } = useApp();
+  const { hasKey, refreshKey, notify, startTour } = useApp();
   const [key, setKey] = useState("");
   const [checking, setChecking] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -62,9 +63,9 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+      <SplitTitle text="Settings" />
 
-      <section className="card flex flex-col gap-3">
+      <section data-tour="apikey" className="card flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Anthropic API key</h2>
           <span className={`font-mono text-xs ${hasKey ? "text-sonny" : "text-accent"}`}>
@@ -139,6 +140,13 @@ export default function SettingsPage() {
           <button className="btn btn-primary self-start" onClick={saveSettings}>Save</button>
         </section>
       )}
+      <section className="card flex items-center justify-between gap-4">
+        <div>
+          <h2 className="font-semibold">Tour</h2>
+          <p className="text-sm text-muted">A one-minute walk through Lymbo, screen by screen.</p>
+        </div>
+        <button className="btn" onClick={startTour}>Take the tour</button>
+      </section>
     </div>
   );
 }

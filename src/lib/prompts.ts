@@ -19,19 +19,19 @@ export const kasprEvaluatePrompt = (resume: string, jobTitle: string, company: s
 RESUME:
 ${resume}
 
-WHERE THEY WANT TO WORK: ${location || "not specified"}
+WHAT THEY'RE LOOKING FOR: ${location || "not specified"}
 
 JOB: ${jobTitle} at ${company}
 ${jd}
 
-Score how relevant this job is for this person, including whether the location fits what they want. Return only this JSON:
+Score how relevant this job is for this person, including whether the location and job type fit what they want. Return only this JSON:
 {"score": <0-100>, "recommend": <true|false>, "reasons": ["<short reason>", "..."]}`;
 
 export const kasprSearchPrompt = (resume: string, location: string) => `
 RESUME:
 ${resume}
 
-WHERE THEY WANT TO WORK: ${location || "not specified"}
+WHAT THEY'RE LOOKING FOR: ${location || "not specified"}
 
 Suggest 3 short Handshake search phrases (2-4 words each, like a job title someone would type)
 for roles this person is a strong fit for. Return only this JSON:
@@ -41,14 +41,14 @@ export const kasprReadJobPrompt = (resume: string, location: string, pageText: s
 RESUME:
 ${resume}
 
-WHERE THEY WANT TO WORK: ${location || "not specified"}
+WHAT THEY'RE LOOKING FOR: ${location || "not specified"}
 
 TEXT OF A HANDSHAKE JOB PAGE (may include menus and other page text; ignore those):
 """
 ${pageText}
 """
 
-Pull out the job and score how relevant it is for this person, including whether the location fits.
+Pull out the job and score how relevant it is for this person, including whether the location and job type (internship vs full-time) fit. A job of the wrong type should score under 30.
 Return only this JSON:
 {"company": "<employer>", "title": "<job title>", "location": "<where, or Remote>",
  "description": "<the responsibilities and requirements, condensed to under 1000 characters>",
@@ -58,13 +58,13 @@ export const kasprRankPrompt = (resume: string, location: string, listings: stri
 RESUME:
 ${resume}
 
-WHERE THEY WANT TO WORK: ${location || "not specified"}
+WHAT THEY'RE LOOKING FOR: ${location || "not specified"}
 
 JOB LISTINGS FROM A HANDSHAKE SEARCH (id: listing text):
 ${listings}
 
-Which of these are worth opening? Skip ones that are clearly a bad fit from the title, company or
-location. Return only this JSON, best first:
+Which of these are worth opening? Skip ones that are clearly a bad fit from the title, company, location,
+or job type (internship vs full-time). Return only this JSON, best first:
 {"open": ["<id>", "..."]}`;
 
 export const SONNY_SYSTEM =
@@ -103,3 +103,48 @@ ${jd}
 
 Write a cover letter for this job, under 300 words. Only use experience that's on the resume.
 Be specific and concrete. Return just the letter text.`;
+
+export interface BatchGroupInput {
+  key: string;
+  jobs: { title: string; company: string }[];
+  /** What sets this group apart from the rest of the batch (found locally). */
+  focus: string[];
+  /** Also common across the group. */
+  shared: string[];
+  /** Group keywords the resume doesn't show yet. */
+  missing: string[];
+}
+
+export const sonnyBatchPrompt = (lines: { p: number; text: string; locked: boolean }[], groups: BatchGroupInput[]) => `
+THE USER'S RESUME, line by line (P = line number; [fixed] lines can't be changed or moved):
+${lines.map((l) => `P${l.p}${l.locked ? " [fixed]" : ""}: ${l.text}`).join("\n")}
+
+GROUPS OF JOBS (already sorted by keywords on the user's computer):
+${groups
+  .map(
+    (g) => `${g.key}: ${g.jobs.map((j) => `${j.title} at ${j.company}`).join("; ")}
+  Focus keywords (what sets this group apart): ${g.focus.join(", ") || "none"}
+  Also common: ${g.shared.join(", ") || "none"}
+  Not on the resume yet: ${g.missing.join(", ") || "nothing"}`,
+  )
+  .join("\n\n")}
+
+Write one tailored version of the resume for each group. The versions must be clearly different
+from each other, each built around its own focus keywords:
+- Rewrite the summary/objective line (if there is one) and the skills line(s) so the focus keywords
+  the resume supports come first.
+- Move the 2-3 bullets that best show the focus keywords to the top of their section
+  (op "move_after", with "after" = the line the bullet should come right after, usually the job/title line).
+- Re-word bullets to use the group's terms for things the resume already shows.
+- Never add a skill, tool, employer, number, degree or result the resume doesn't support. If a focus
+  keyword isn't supported by the resume, leave it out.
+- Keep each changed line within ~15% of its original length. Don't change names, contact info,
+  headings, dates or [fixed] lines.
+- 5 to 12 edits per group. Plain, direct wording, no buzzwords.
+
+Return only this JSON:
+{"groups": [{"group": "<G1, G2, ...>", "label": "<short role name, e.g. Data Analyst>",
+             "summary": "<one sentence: what this version leads with>",
+             "edits": [{"p": <line number>, "op": "replace" | "insert_after" | "delete" | "move_after",
+                        "text": "<new text, for replace / insert_after>",
+                        "after": <line number, for move_after>, "why": "<short reason>"}]}]}`;

@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { animate } from "animejs";
+import { Splash } from "./components/Splash";
+import { PixelRocket } from "./components/PixelRocket";
+import { Tour, Welcome, setTourDismissed, tourDismissed } from "./components/Tour";
+import { DotGrid, type DotGridHandle } from "./components/DotGrid";
+import { enter, press, wave } from "./lib/motion";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
@@ -27,6 +33,27 @@ let toastId = 0;
 
 export default function App() {
   const [page, setPage] = useState<Page>("control");
+  const [splash, setSplash] = useState(true);
+  const [welcome, setWelcome] = useState(false);
+  const [tourStep, setTourStep] = useState<number | null>(null);
+  const startTour = useCallback(() => { setWelcome(false); setTourStep(0); }, []);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const grid = useRef<DotGridHandle>(null);
+  const logo = useRef<HTMLButtonElement>(null);
+  // Switching screens: the dot grid ripples and the screen's cards spring in one after another.
+  useEffect(() => {
+    if (!pageRef.current) return;
+    animate(pageRef.current, { opacity: [0, 1], duration: 250, ease: "outQuad" });
+    enter(pageRef.current.querySelectorAll(".card"), 70);
+    grid.current?.ripple();
+  }, [page]);
+  // Clicks ripple the grid from where you clicked; buttons squash a little.
+  const onMainClick = (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    grid.current?.ripple(e.clientX - r.left, e.clientY - r.top);
+    const btn = (e.target as HTMLElement).closest(".btn");
+    if (btn && !(btn as HTMLButtonElement).disabled) press(btn);
+  };
   const [session, setSession] = useState<SessionStatus>(EMPTY_SESSION);
   const [hasKey, setHasKey] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -36,6 +63,10 @@ export default function App() {
   const [location, setLocation] = useState<{ text: string; summary: string } | null>(null);
   const [kaspr, setKasprState] = useState<KasprState>(KASPR_INITIAL);
   const setKaspr = useCallback((patch: Partial<KasprState>) => setKasprState((k) => ({ ...k, ...patch })), []);
+  const updateJobs = useCallback(
+    (fn: (jobs: KasprState["jobs"]) => KasprState["jobs"]) => setKasprState((k) => ({ ...k, jobs: fn(k.jobs) })),
+    [],
+  );
 
   const notify = useCallback((t: Omit<Toast, "id">) => setToasts((ts) => [...ts, { ...t, id: ++toastId }]), []);
   const setBusy = useCallback((agent: AgentName, on: boolean) => {
@@ -160,7 +191,7 @@ export default function App() {
   }, [page, busy]);
 
   const ctx: AppCtx = {
-    kaspr, setKaspr,
+    kaspr, setKaspr, updateJobs, startTour,
     session, refreshSession, startSession, killSession, hasKey, refreshKey, notify, setBusy,
     go: setPage, workshopJob, setWorkshopJob, location, setLocation, dataVersion, bumpData: () => setDataVersion((v) => v + 1),
   };
@@ -169,16 +200,23 @@ export default function App() {
     <Ctx.Provider value={ctx}>
       <div className="flex h-full">
         <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-panel px-3 py-5">
-          <div className="mb-8 px-2 font-mono text-xl font-bold tracking-[0.3em]">
-            LYMBO<span className="text-accent">.</span>
+          <div className="mb-8 flex items-center gap-2 whitespace-nowrap px-2 font-mono text-xl font-bold tracking-[0.25em]">
+            <button ref={logo} onClick={() => setSplash(true)} title="Replay intro"
+              onMouseEnter={() => logo.current && wave(logo.current.querySelectorAll("span"))}>
+              {"LYMBO".split("").map((c, i) => <span key={i} className="inline-block">{c}</span>)}
+              <span className="inline-block text-accent">.</span>
+            </button>
+            <PixelRocket px={2} className="logo-rocket shrink-0" />
           </div>
-          <nav className="flex flex-col gap-1">
+          <nav data-tour="nav" className="flex flex-col gap-1">
             {NAV.map((n) => (
               <button
                 key={n.id}
                 onClick={() => setPage(n.id)}
-                className={`rounded-lg px-3 py-2 text-left transition ${
-                  page === n.id ? "bg-panel2 text-white" : "text-muted hover:bg-panel2/60 hover:text-white"
+                className={`relative rounded-lg px-3 py-2 text-left transition ${
+                  page === n.id
+                    ? "bg-panel2 text-white before:absolute before:left-0 before:top-2 before:bottom-2 before:w-0.5 before:rounded-full before:bg-accent"
+                    : "text-muted hover:translate-x-0.5 hover:bg-panel2/60 hover:text-white"
                 }`}
               >
                 <div className="text-sm font-medium">{n.label}</div>
@@ -189,9 +227,10 @@ export default function App() {
           <div className="mt-auto px-2 text-xs text-muted">{version && `v${version} · `}data stays on this computer</div>
         </aside>
 
-        <main className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-20 shrink-0 items-center justify-between border-b border-line px-6">
-            <div className="flex items-center gap-4">
+        <main className="relative flex min-w-0 flex-1 flex-col" onClick={onMainClick}>
+          <DotGrid ref={grid} />
+          <header className="relative z-10 flex h-20 shrink-0 items-center justify-between border-b border-line bg-ink/70 px-6 backdrop-blur">
+            <div data-tour="session" className="flex items-center gap-4">
               {session.active ? (
                 <>
                   <span className="flex items-center gap-2 font-mono text-sm">
@@ -219,7 +258,7 @@ export default function App() {
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          <div ref={pageRef} key={page} className="relative z-10 min-h-0 flex-1 overflow-y-auto p-6">
             {page === "control" && <ControlRoom />}
             {page === "kaspr" && <KasprPage />}
             {page === "sonny" && <SonnyPage />}
@@ -228,6 +267,12 @@ export default function App() {
         </main>
       </div>
       <Toasts toasts={toasts} dismiss={(id) => setToasts((ts) => ts.filter((t) => t.id !== id))} />
+      {splash && <Splash onDone={() => { setSplash(false); setPage("control"); if (!tourDismissed()) setWelcome(true); }} />}
+      {welcome && !splash && <Welcome onStart={startTour} onClose={() => setWelcome(false)} />}
+      {tourStep !== null && !splash && (
+        <Tour step={tourStep} setStep={setTourStep} go={setPage}
+          onEnd={() => { setTourStep(null); setTourDismissed(true); setPage("control"); }} />
+      )}
     </Ctx.Provider>
   );
 }

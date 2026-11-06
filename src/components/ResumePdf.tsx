@@ -26,16 +26,20 @@ export function ResumePdf({ resume, height = "h-96" }: { resume: Resume; height?
   }, [resume.id]);
 
   const open = () => api.resumeOpenPdf(resume.id).catch((e) => notify({ text: errText(e), tone: "error" }));
+  const openDocx = () => api.resumeOpenFile(resume.id, "docx").catch((e) => notify({ text: errText(e), tone: "error" }));
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted">{resume.label}</span>
-        {!noPdf && (
-          <button className="text-xs text-muted underline hover:text-white" onClick={open}>
-            Open PDF in Preview
-          </button>
-        )}
+        <span className="flex gap-3">
+          {resume.has_docx && (
+            <button className="text-xs text-muted underline hover:text-white" onClick={openDocx}>Open Word file</button>
+          )}
+          {!noPdf && (
+            <button className="text-xs text-muted underline hover:text-white" onClick={open}>Open PDF</button>
+          )}
+        </span>
       </div>
       {url ? (
         <iframe src={url} title={resume.label} className={`${height} w-full rounded-md border border-line bg-white`} />
@@ -44,7 +48,11 @@ export function ResumePdf({ resume, height = "h-96" }: { resume: Resume; height?
           <pre className={`${height} overflow-auto whitespace-pre-wrap rounded-md border border-line bg-ink p-3 font-mono text-xs text-muted`}>
             {resume.content}
           </pre>
-          <p className="text-xs text-muted">This resume was added before PDF upload existed. Upload the PDF in the Control Room to see it here.</p>
+          <p className="text-xs text-muted">
+            {resume.has_docx
+              ? "No preview: making one needs Microsoft Word or LibreOffice on this computer. The Word file is saved and SONNY can still use it."
+              : "This resume was pasted in as text. Upload the file in the Control Room to see it here."}
+          </p>
         </>
       ) : (
         <div className={`${height} rounded-md border border-line`} />

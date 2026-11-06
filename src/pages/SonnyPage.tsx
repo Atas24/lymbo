@@ -1,3 +1,4 @@
+import { SplitTitle } from "../components/SplitTitle";
 import { useEffect, useMemo, useState } from "react";
 import { api, currentResume, errText } from "../lib/api";
 import { sonnyReview, type SonnyReview } from "../lib/agents";
@@ -6,6 +7,7 @@ import { useApp } from "../lib/context";
 import type { JobContext, Resume } from "../lib/types";
 import { SonnySprite } from "../components/Sprites";
 import { ResumePdf } from "../components/ResumePdf";
+import { VersionsPanel } from "../components/VersionsPanel";
 import { KeywordBar } from "../components/KeywordBar";
 import { matchKeywords } from "../lib/keywords";
 
@@ -19,12 +21,15 @@ export default function SonnyPage() {
   const [letter, setLetter] = useState("");
   const [working, setWorking] = useState<"review" | "letter" | null>(null);
   const [counted, setCounted] = useState(false);
+  // Open on a single job when KASPR or the manual flow hands one over; otherwise show versions.
+  const [tab, setTab] = useState<"versions" | "single">(workshopJob ? "single" : "versions");
 
   useEffect(() => {
     currentResume().then(setResume).catch((e) => notify({ text: errText(e), tone: "error" }));
   }, [notify, dataVersion]);
   useEffect(() => {
     if (workshopJob) {
+      setTab("single");
       setJob(workshopJob);
       setReview(null);
       setLetter("");
@@ -87,11 +92,23 @@ export default function SonnyPage() {
       <div className="flex items-center gap-4">
         <SonnySprite size={48} busy={!!working} />
         <div>
-          <h1 className="text-2xl font-semibold">SONNY</h1>
-          <p className="text-sm text-muted">Suggests how to tailor your resume for a job. You make the edits.</p>
+          <SplitTitle text="SONNY" />
+          <p className="text-sm text-muted">Tailors your resume for the kinds of jobs KASPR finds. Nothing changes without your OK.</p>
         </div>
       </div>
 
+      <div data-tour="versions" className="flex gap-1 self-start rounded-lg border border-line p-1">
+        {([["versions", "Resume versions"], ["single", "Check one job"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className={`rounded-md px-3 py-1.5 text-sm transition ${tab === id ? "bg-panel2 text-white" : "text-muted hover:text-white"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "versions" && <VersionsPanel hasDocx={!!resume?.has_docx} />}
+
+      {tab === "single" && (<>
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="card flex flex-col gap-3">
           <h2 className="font-semibold">The job</h2>
@@ -180,6 +197,7 @@ export default function SonnyPage() {
           </div>
         </section>
       )}
+      </>)}
     </div>
   );
 }

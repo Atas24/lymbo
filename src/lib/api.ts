@@ -1,7 +1,8 @@
 // Thin typed wrappers around the Rust commands in src-tauri/src/commands.rs.
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AiResult, AgentName, Application, CoverLetter, JobLink, LoginOutcome, Resume, SessionStatus, Settings, Stats,
+  AiResult, AgentName, Application, CoverLetter, Edit, JobLink, LoginOutcome, Resume, ResumeLine, ResumeVersion,
+  SessionStatus, Settings, Stats,
 } from "./types";
 
 export const api = {
@@ -32,11 +33,28 @@ export const api = {
   /** Original PDF bytes; rejects if the resume was pasted as text. */
   resumePdf: (id: number) => invoke<ArrayBuffer>("resume_pdf", { id }),
   resumeOpenPdf: (id: number) => invoke<void>("resume_open_pdf", { id }),
+  resumeUploadDocx: (fileName: string, bytes: number[]) => invoke<number>("resume_upload_docx", { fileName, bytes }),
+  resumeLines: (id: number) => invoke<ResumeLine[]>("resume_paragraphs", { id }),
+  resumeOpenFile: (id: number, kind: "docx" | "pdf") => invoke<void>("resume_open_file", { id, kind }),
+
+  versions: () => invoke<ResumeVersion[]>("versions_list"),
+  versionCreate: (v: { baseResumeId: number; label: string; summary: string; edits: Edit[]; jobIds: string[]; keywords: string[] }) =>
+    invoke<number>("version_create", v),
+  versionApprove: (id: number, edits: Edit[]) => invoke<void>("version_approve", { id, edits }),
+  versionArchive: (id: number) => invoke<void>("version_archive", { id }),
+  versionDelete: (id: number) => invoke<void>("version_delete", { id }),
+  resumeDelete: (id: number) => invoke<void>("resume_delete", { id }),
+  coverLetterDelete: (id: number) => invoke<void>("cover_letter_delete", { id }),
+  versionLearn: (id: number, jobId: string, keywords: string[]) => invoke<void>("version_learn", { id, jobId, keywords }),
+  versionOpen: (id: number, kind: "docx" | "pdf") => invoke<void>("version_open", { id, kind }),
+  versionPdf: (id: number) => invoke<ArrayBuffer>("version_pdf", { id }),
+  versionExportPdf: (id: number) => invoke<void>("version_export_pdf", { id }),
+
   resumeSetCurrent: (id: number) => invoke<void>("resume_set_current", { id }),
 
   applications: () => invoke<Application[]>("applications_list"),
-  applicationAdd: (company: string, title: string, url: string, notes: string) =>
-    invoke<number>("application_add", { company, title, url, notes }),
+  applicationAdd: (company: string, title: string, url: string, notes: string, versionId: number | null = null) =>
+    invoke<number>("application_add", { company, title, url, notes, versionId }),
   applicationSetStatus: (id: number, status: string) =>
     invoke<void>("application_set_status", { id, status }),
 

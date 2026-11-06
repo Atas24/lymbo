@@ -2,9 +2,9 @@
 import { api, parseJson } from "./api";
 import {
   KASPR_SYSTEM, SONNY_SYSTEM, kasprEvaluatePrompt, kasprLocationPrompt, kasprRankPrompt, kasprReadJobPrompt, kasprSearchPrompt,
-  sonnyAlignmentPrompt,
+  sonnyAlignmentPrompt, sonnyBatchPrompt, type BatchGroupInput,
 } from "./prompts";
-import type { JobContext, JobLink } from "./types";
+import type { Edit, JobContext, JobLink, ResumeLine } from "./types";
 import type { KeywordMatch } from "./keywords";
 
 export interface KasprVerdict {
@@ -93,4 +93,41 @@ export async function kasprRank(resume: string, location: string, links: JobLink
   const ids = parseJson<{ open: string[] }>(r.text).open ?? [];
   const byId = new Map(links.map((l) => [l.id, l]));
   return ids.map((id) => byId.get(String(id))).filter((l): l is JobLink => !!l);
+}
+
+export interface SonnyGroup {
+  key: string;
+  label: string;
+  summary: string;
+  edits: Edit[];
+}
+
+/**
+ * SONNY writes one tailored version per group. The groups and their focus keywords were
+ * worked out locally, so SONNY only does the writing. Edits are checked here so nothing
+ * touches a locked line or a line that doesn't exist.
+ */
+export async function sonnyBatch(lines: ResumeLine[], groups: BatchGroupInput[]): Promise<SonnyGroup[]> {
+  const r = await api.aiJson("SONNY", SONNY_SYSTEM, sonnyBatchPrompt(lines, groups), 8000);
+  const v = parseJson<{ groups?: (Omit<SonnyGroup, "key"> & { group: string })[] }>(r.text);
+  const byP = new Map(lines.map((l) => [l.p, l]));
+  const keys = new Set(groups.map((g) => g.key));
+  return (v.groups ?? [])
+    .filter((g) => keys.has(String(g.group)))
+    .map((g) => ({
+      key: String(g.group),
+      label: String(g.label || "Tailored").slice(0, 40),
+      summary: String(g.summary || ""),
+      edits: (g.edits ?? [])
+        .map((e) => ({ ...e, p: Number(e.p), after: e.after === undefined || e.after === null ? undefined : Number(e.after) }))
+        .filter((e) => {
+          const line = byP.get(e.p);
+          if (!line || line.locked) return false;
+          if (e.op === "delete") return true;
+          if (e.op === "move_after") return e.after !== undefined && e.after !== e.p && byP.has(e.after);
+          return (e.op === "replace" || e.op === "insert_after") && !!e.text?.trim();
+        })
+        .slice(0, 12),
+    }))
+    .filter((g) => g.edits.length > 0);
 }

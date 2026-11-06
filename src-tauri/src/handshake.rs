@@ -138,7 +138,8 @@ const COLLECT_LINKS_JS: &str = r#"(() => {
   for (const a of document.querySelectorAll('a[href]')) {
     const m = a.href.match(/\/(?:stu\/)?(?:jobs|job-search|postings)\/(\d+)/);
     if (!m) continue;
-    const text = (a.innerText || a.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    const text = (a.innerText || a.getAttribute('aria-label') || '')
+      .split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n').slice(0, 300);
     if (!seen.has(m[1]) || text.length > seen.get(m[1]).length) seen.set(m[1], text);
   }
   return JSON.stringify([...seen].map(([id, text]) => ({ id, text })));

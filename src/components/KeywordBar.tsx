@@ -1,8 +1,15 @@
+import { useEffect, useRef } from "react";
 import type { KeywordMatch } from "../lib/keywords";
+import { popIn } from "../lib/motion";
 
 /** Instant, local keyword coverage: what a resume screener would look for. */
 export function KeywordBar({ match, showCovered = false }: { match: KeywordMatch; showCovered?: boolean }) {
   const total = match.covered.length + match.missing.length;
+  const chips = useRef<HTMLDivElement>(null);
+  const sig = match.covered.join() + "|" + match.missing.join();
+  useEffect(() => {
+    if (chips.current) popIn(chips.current.children, 30);
+  }, [sig]);
   if (total === 0 && match.requirements.length === 0) return null;
   const pct = Math.round(match.coverage * 100);
   const color = pct >= 70 ? "bg-sonny" : pct >= 45 ? "bg-kaspr" : "bg-accent";
@@ -19,7 +26,7 @@ export function KeywordBar({ match, showCovered = false }: { match: KeywordMatch
           </span>
         </div>
       )}
-      <div className="flex flex-wrap gap-1.5">
+      <div ref={chips} className="flex flex-wrap gap-1.5">
         {showCovered &&
           match.covered.map((k) => (
             <span key={k} className="rounded-full border border-sonny/40 px-2.5 py-0.5 text-xs text-sonny">{k}</span>

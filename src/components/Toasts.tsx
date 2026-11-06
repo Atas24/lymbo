@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
 import { animate } from "animejs";
+import { springy } from "../lib/motion";
 import type { Toast } from "../lib/context";
 
 function ToastItem({ t, onClose }: { t: Toast; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (ref.current) animate(ref.current, { translateX: [40, 0], opacity: [0, 1], duration: 350, ease: "outQuad" });
+    if (ref.current) animate(ref.current, { translateX: [80, 0], scale: [0.9, 1], opacity: [0, 1], ease: springy });
     // Agent suggestions stay until dismissed; plain notices fade on their own.
     if (!t.action) {
       const id = setTimeout(onClose, 5000);

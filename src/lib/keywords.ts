@@ -27,7 +27,7 @@ const GROUPS: string[][] = [
   ["CI/CD", "continuous integration"], ["Terraform"], ["Microservices"], ["NoSQL", "mongodb", "dynamodb", "cassandra"],
   ["Unit testing", "pytest", "jest", "test-driven"], ["Agile", "scrum", "kanban"], ["Jira"], ["Object-oriented programming", "oop", "object oriented"],
   ["Data structures", "algorithms"], ["Distributed systems"], ["Cybersecurity", "security"], ["Embedded systems"],
-  ["CAD", "solidworks", "autocad"], ["ROS"], ["Simulation", "simulations"], ["Signal processing"], ["Biomechanics"],
+  ["CAD", "solidworks", "autocad"], ["ROS"], ["Simulation", "simulations"], ["Signal processing"], ["Biomechanics"], ["Motion capture", "motion-capture", "mocap"], ["DAX"], ["Product analytics"],
   // business
   ["Financial modeling", "financial models"], ["Valuation", "dcf"], ["Accounting"], ["Budgeting"], ["Market research"],
   ["Product management", "product roadmap", "roadmap"], ["Project management"], ["Stakeholder management", "stakeholders", "cross-functional"],
@@ -91,3 +91,143 @@ export function matchKeywords(jobText: string, resumeText: string): KeywordMatch
 
 /** Whether SONNY should speak up: the resume is missing a meaningful share of what the job asks for. */
 export const worthTailoring = (m: KeywordMatch) => m.missing.length >= 3 && m.coverage < 0.7;
+
+/** How well each approved resume version covers a job; best first. Free and local. */
+export function rankVersions<V extends { id: number; text: string; keywords: Record<string, number> }>(
+  jobText: string,
+  versions: V[],
+): { version: V; match: KeywordMatch; score: number }[] {
+  const jobKw = keywordsIn(jobText);
+  return versions
+    .map((v) => {
+      const match = matchKeywords(jobText, v.text);
+      // Small bonus for versions already used for jobs that asked for the same things.
+      const seen = jobKw.length ? jobKw.filter((k) => (v.keywords[k] ?? 0) > 0).length / jobKw.length : 0;
+      return { version: v, match, score: match.coverage + 0.1 * seen };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+/** A version is a good enough fit to use without asking SONNY. */
+export const VERSION_FIT = 0.6;
+
+// ---------- grouping a batch by keywords (local, free) ----------
+
+/** Soft skills nearly every posting lists; they shouldn't decide which group a job is in. */
+const GENERIC = new Set([
+  "Communication", "Teamwork", "Leadership", "Problem solving", "Attention to detail", "Time management",
+  "Research", "Reporting", "Presentations", "Operations", "Customer service", "Mentoring", "KPIs",
+]);
+const weightOf = (k: string, df: number, n: number) => Math.log((n + 1) / (df + 0.5)) * (GENERIC.has(k) ? 0.3 : 1);
+
+export interface JobKeywords {
+  id: string;
+  keywords: string[];
+}
+
+export interface KeywordCluster {
+  jobIds: string[];
+  /** keyword -> how many jobs in this group ask for it */
+  counts: Record<string, number>;
+  /** What sets this group apart from the rest of the batch. SONNY tailors around these. */
+  focus: string[];
+  /** Asked for across the group but also common elsewhere. */
+  shared: string[];
+}
+
+/**
+ * Groups jobs by the keywords they ask for. Rare, specific keywords (Power BI, biomechanics)
+ * count more than ones every posting has (communication), so groups split along real
+ * differences. Groups that end up too alike are merged.
+ */
+export function clusterJobs(jobs: JobKeywords[], maxClusters = 4): KeywordCluster[] {
+  const n = jobs.length;
+  if (n === 0) return [];
+  const df: Record<string, number> = {};
+  for (const j of jobs) for (const k of new Set(j.keywords)) df[k] = (df[k] ?? 0) + 1;
+  const w = (k: string) => weightOf(k, df[k] ?? 0, n);
+
+  type G = { jobs: JobKeywords[]; counts: Record<string, number> };
+  const core = (g: G) => {
+    // keywords at least half the group asks for (all of them for a single job)
+    const need = Math.max(1, Math.ceil(g.jobs.length / 2));
+    return new Set(Object.keys(g.counts).filter((k) => g.counts[k] >= need));
+  };
+  const sim = (a: Set<string>, b: Set<string>) => {
+    let inter = 0, union = 0;
+    for (const k of new Set([...a, ...b])) {
+      union += w(k);
+      if (a.has(k) && b.has(k)) inter += w(k);
+    }
+    return union ? inter / union : 0;
+  };
+  const add = (g: G, j: JobKeywords) => {
+    g.jobs.push(j);
+    for (const k of new Set(j.keywords)) g.counts[k] = (g.counts[k] ?? 0) + 1;
+  };
+
+  const groups: G[] = [];
+  for (const j of [...jobs].sort((a, b) => b.keywords.length - a.keywords.length)) {
+    const set = new Set(j.keywords);
+    let best: G | null = null, bestSim = 0;
+    for (const g of groups) {
+      const s = sim(set, core(g));
+      if (s > bestSim) [best, bestSim] = [g, s];
+    }
+    if (best && bestSim >= 0.35) add(best, j);
+    else {
+      const g: G = { jobs: [], counts: {} };
+      add(g, j);
+      groups.push(g);
+    }
+  }
+
+  // Merge groups that are too alike, then the smallest ones until we're under the cap.
+  const merge = (a: G, b: G) => {
+    for (const j of b.jobs) add(a, j);
+    groups.splice(groups.indexOf(b), 1);
+  };
+  const closestPair = () => {
+    let pair: [G, G] | null = null, best = -1;
+    for (let i = 0; i < groups.length; i++)
+      for (let k = i + 1; k < groups.length; k++) {
+        const s = sim(core(groups[i]), core(groups[k]));
+        if (s > best) [pair, best] = [[groups[i], groups[k]], s];
+      }
+    return { pair, best };
+  };
+  for (let c = closestPair(); c.pair && c.best >= 0.6; c = closestPair()) merge(c.pair[0], c.pair[1]);
+  while (groups.length > maxClusters) {
+    const smallest = [...groups].sort((a, b) => a.jobs.length - b.jobs.length)[0];
+    const others = groups.filter((g) => g !== smallest);
+    const target = others.sort((a, b) => sim(core(b), core(smallest)) - sim(core(a), core(smallest)))[0];
+    merge(target, smallest);
+  }
+
+  return groups.map((g) => {
+    const size = g.jobs.length;
+    const outside = n - size;
+    const scored = Object.keys(g.counts).map((k) => {
+      const inShare = g.counts[k] / size;
+      const outShare = outside ? ((df[k] ?? 0) - g.counts[k]) / outside : 0;
+      return { k, distinct: (inShare - outShare) * (GENERIC.has(k) ? 0.3 : 1), inShare };
+    });
+    const focus = scored.filter((s) => s.distinct > 0.25).sort((a, b) => b.distinct - a.distinct).slice(0, 8).map((s) => s.k);
+    const shared = scored
+      .filter((s) => s.inShare >= 0.5 && !focus.includes(s.k))
+      .sort((a, b) => b.inShare - a.inShare)
+      .slice(0, 8)
+      .map((s) => s.k);
+    return { jobIds: g.jobs.map((j) => j.id), counts: g.counts, focus: focus.length ? focus : shared.slice(0, 5), shared };
+  });
+}
+
+/** Does a new group of jobs ask for the same things an existing version was built for? */
+export function clusterFitsVersion(cluster: KeywordCluster, versionKeywords: Record<string, number>): number {
+  const a = new Set(Object.keys(cluster.counts));
+  const b = new Set(Object.keys(versionKeywords));
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const k of a) if (b.has(k)) inter++;
+  return inter / new Set([...a, ...b]).size;
+}

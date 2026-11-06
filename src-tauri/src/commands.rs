@@ -1,6 +1,6 @@
 //! Everything the React UI can call. Each returns Result<_, String> so errors
 //! show up as readable messages in the app.
-use crate::{ai, db, handshake, keys, session::SessionStatus, AppState};
+use crate::{ai, convert, db, docx, handshake, keys, session::SessionStatus, AppState};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -215,8 +215,13 @@ pub fn settings_set(state: State<'_, AppState>, settings: db::Settings) -> Resul
 // ---------- Control Room library ----------
 
 #[tauri::command]
-pub fn resumes_list(state: State<'_, AppState>) -> Result<Vec<db::Resume>, String> {
-    db::resumes(&state.db.lock().unwrap()).map_err(db_err)
+pub fn resumes_list(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<db::Resume>, String> {
+    let mut list = db::resumes(&state.db.lock().unwrap()).map_err(db_err)?;
+    for r in &mut list {
+        r.has_docx = file_path(&app, "resumes", r.id, "docx")?.exists();
+        r.has_pdf = file_path(&app, "resumes", r.id, "pdf")?.exists();
+    }
+    Ok(list)
 }
 
 #[tauri::command]
@@ -261,12 +266,195 @@ pub fn resume_upload_pdf(
 }
 
 fn resume_pdf_path(app: &AppHandle, id: i64) -> Result<std::path::PathBuf, String> {
+    file_path(app, "resumes", id, "pdf")
+}
+
+/// `<app data>/<folder>/<id>.<ext>`, e.g. resumes/3.docx or versions/7.pdf.
+fn file_path(app: &AppHandle, folder: &str, id: i64, ext: &str) -> Result<std::path::PathBuf, String> {
     Ok(app
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
-        .join("resumes")
-        .join(format!("{id}.pdf")))
+        .join(folder)
+        .join(format!("{id}.{ext}")))
+}
+
+fn open_file(app: &AppHandle, path: &std::path::Path) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !path.exists() {
+        return Err("That file isn't there anymore.".into());
+    }
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| format!("Couldn't open the file: {e}"))
+}
+
+/// Takes an uploaded .docx resume: keeps the file (SONNY edits copies of it),
+/// pulls out its text for the agents, and makes a PDF preview if it can.
+#[tauri::command]
+pub async fn resume_upload_docx(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<i64, String> {
+    let text = docx::text_of(&bytes)?;
+    if text.trim().len() < 50 {
+        return Err("That .docx doesn't have enough text to be a resume.".into());
+    }
+    let label = file_name.trim_end_matches(".docx").trim_end_matches(".DOCX").to_string();
+    let id = db::add_resume(&state.db.lock().unwrap(), &label, &text).map_err(db_err)?;
+    let docx_path = file_path(&app, "resumes", id, "docx")?;
+    std::fs::create_dir_all(docx_path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&docx_path, &bytes).map_err(|e| format!("Couldn't save the file: {e}"))?;
+    let pdf_path = file_path(&app, "resumes", id, "pdf")?;
+    // Preview only: fine if there's no Word/LibreOffice to make it.
+    let _ = tauri::async_runtime::spawn_blocking(move || convert::docx_to_pdf(&docx_path, &pdf_path)).await;
+    Ok(id)
+}
+
+#[derive(Serialize)]
+pub struct ParaOut {
+    pub p: usize,
+    pub text: String,
+    pub locked: bool,
+}
+
+/// The resume's lines, numbered, for SONNY to suggest edits against.
+#[tauri::command]
+pub fn resume_paragraphs(app: AppHandle, id: i64) -> Result<Vec<ParaOut>, String> {
+    let bytes = std::fs::read(file_path(&app, "resumes", id, "docx")?)
+        .map_err(|_| "Upload your resume as a Word file (.docx) so SONNY can make versions of it.".to_string())?;
+    let xml = docx::document_xml(&bytes)?;
+    Ok(docx::paragraphs(&xml)
+        .into_iter()
+        .enumerate()
+        .filter(|(_, p)| !p.text.trim().is_empty())
+        .map(|(i, p)| ParaOut { p: i, text: p.text, locked: p.locked })
+        .collect())
+}
+
+/// Opens a resume's .docx or .pdf in the default app (Word, Pages, Preview…).
+#[tauri::command]
+pub fn resume_open_file(app: AppHandle, id: i64, kind: String) -> Result<(), String> {
+    let ext = if kind == "docx" { "docx" } else { "pdf" };
+    open_file(&app, &file_path(&app, "resumes", id, ext)?)
+}
+
+// ---------- resume versions ----------
+
+#[tauri::command]
+pub fn versions_list(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<db::Version>, String> {
+    let mut list = db::versions(&state.db.lock().unwrap()).map_err(db_err)?;
+    for v in &mut list {
+        v.has_pdf = file_path(&app, "versions", v.id, "pdf")?.exists();
+    }
+    Ok(list)
+}
+
+/// SONNY proposes a version; it waits for the user's OK before anything is written.
+#[tauri::command]
+pub fn version_create(
+    state: State<'_, AppState>,
+    base_resume_id: i64,
+    label: String,
+    summary: String,
+    edits: Vec<docx::Edit>,
+    job_ids: Vec<String>,
+    keywords: Vec<String>,
+) -> Result<i64, String> {
+    let mut kws = serde_json::Map::new();
+    for k in keywords {
+        kws.insert(k, 1.into());
+    }
+    db::add_version(
+        &state.db.lock().unwrap(),
+        base_resume_id,
+        label.trim(),
+        summary.trim(),
+        &serde_json::to_string(&edits).unwrap(),
+        &serde_json::to_string(&job_ids).unwrap(),
+        &serde_json::Value::Object(kws).to_string(),
+    )
+    .map_err(db_err)
+}
+
+/// The user approved a version (with the edits they kept): write its .docx and PDF.
+#[tauri::command]
+pub async fn version_approve(app: AppHandle, state: State<'_, AppState>, id: i64, edits: Vec<docx::Edit>) -> Result<(), String> {
+    let base = db::version_base(&state.db.lock().unwrap(), id).map_err(db_err)?;
+    let base_bytes = std::fs::read(file_path(&app, "resumes", base, "docx")?)
+        .map_err(|_| "The original .docx for this version is missing. Upload it again in the Control Room.".to_string())?;
+    let out = docx::apply(&base_bytes, &edits)?;
+    let text = docx::text_of(&out)?;
+    let docx_path = file_path(&app, "versions", id, "docx")?;
+    std::fs::create_dir_all(docx_path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&docx_path, &out).map_err(|e| format!("Couldn't save the version: {e}"))?;
+    db::approve_version(&state.db.lock().unwrap(), id, &serde_json::to_string(&edits).unwrap(), &text).map_err(db_err)?;
+    let pdf_path = file_path(&app, "versions", id, "pdf")?;
+    let _ = tauri::async_runtime::spawn_blocking(move || convert::docx_to_pdf(&docx_path, &pdf_path)).await;
+    Ok(())
+}
+
+/// Deletes a resume, its files, and the versions made from it.
+#[tauri::command]
+pub fn resume_delete(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let vids = db::delete_resume(&state.db.lock().unwrap(), id).map_err(db_err)?;
+    for ext in ["docx", "pdf"] {
+        let _ = std::fs::remove_file(file_path(&app, "resumes", id, ext)?);
+        for v in &vids {
+            let _ = std::fs::remove_file(file_path(&app, "versions", *v, ext)?);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn version_delete(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    db::delete_version(&state.db.lock().unwrap(), id).map_err(db_err)?;
+    for ext in ["docx", "pdf"] {
+        let _ = std::fs::remove_file(file_path(&app, "versions", id, ext)?);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cover_letter_delete(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    db::delete_cover_letter(&state.db.lock().unwrap(), id).map_err(db_err)
+}
+
+#[tauri::command]
+pub fn version_archive(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    db::set_version_status(&state.db.lock().unwrap(), id, "archived").map_err(db_err)
+}
+
+/// KASPR matched a job to this version; the version's keyword profile grows.
+#[tauri::command]
+pub fn version_learn(state: State<'_, AppState>, id: i64, job_id: String, keywords: Vec<String>) -> Result<(), String> {
+    db::version_learn(&state.db.lock().unwrap(), id, &job_id, &keywords).map_err(db_err)
+}
+
+#[tauri::command]
+pub fn version_open(app: AppHandle, id: i64, kind: String) -> Result<(), String> {
+    let ext = if kind == "docx" { "docx" } else { "pdf" };
+    open_file(&app, &file_path(&app, "versions", id, ext)?)
+}
+
+/// PDF bytes for the in-app preview.
+#[tauri::command]
+pub fn version_pdf(app: AppHandle, id: i64) -> Result<tauri::ipc::Response, String> {
+    let bytes = std::fs::read(file_path(&app, "versions", id, "pdf")?).map_err(|_| "No PDF for this version yet.".to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Try making the PDF again (e.g. after installing Word or LibreOffice).
+#[tauri::command]
+pub async fn version_export_pdf(app: AppHandle, id: i64) -> Result<(), String> {
+    let src = file_path(&app, "versions", id, "docx")?;
+    let dst = file_path(&app, "versions", id, "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || convert::docx_to_pdf(&src, &dst))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// The resume's original PDF, sent as raw bytes. Errors if it was pasted as text.
@@ -307,11 +495,12 @@ pub fn application_add(
     title: String,
     url: String,
     notes: String,
+    version_id: Option<i64>,
 ) -> Result<i64, String> {
     if company.trim().is_empty() || title.trim().is_empty() {
         return Err("Company and job title are required.".into());
     }
-    db::add_application(&state.db.lock().unwrap(), company.trim(), title.trim(), url.trim(), &notes)
+    db::add_application(&state.db.lock().unwrap(), company.trim(), title.trim(), url.trim(), &notes, version_id)
         .map_err(db_err)
 }
 

@@ -1,6 +1,8 @@
 mod ai;
 mod commands;
+mod convert;
 mod db;
+mod docx;
 mod handshake;
 mod keys;
 mod session;
@@ -53,6 +55,20 @@ pub fn run() {
             commands::resume_upload_pdf,
             commands::resume_pdf,
             commands::resume_open_pdf,
+            commands::resume_upload_docx,
+            commands::resume_paragraphs,
+            commands::resume_open_file,
+            commands::versions_list,
+            commands::version_create,
+            commands::version_approve,
+            commands::version_archive,
+            commands::resume_delete,
+            commands::version_delete,
+            commands::cover_letter_delete,
+            commands::version_learn,
+            commands::version_open,
+            commands::version_pdf,
+            commands::version_export_pdf,
             commands::applications_list,
             commands::application_add,
             commands::application_set_status,
