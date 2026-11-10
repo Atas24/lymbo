@@ -162,7 +162,7 @@ export function whyBest(ranked: RankedResume[]): string {
   const [best, next] = ranked;
   if (!best) return "";
   const total = best.match.covered.length + best.match.missing.length;
-  if (total === 0) return "KASPR couldn't find specific skills in this posting to compare. Open \"The posting as KASPR read it\" below to see what he read, and read the job over yourself.";
+  if (total === 0) return "KASPR couldn't find specific skills in this posting to compare. Check the description under the job title to see what he read.";
   let s = `Covers ${best.match.covered.length} of the ${total} skills this job asks for`;
   if (!next) s += ".";
   else if (best.match.coverage > next.match.coverage) {

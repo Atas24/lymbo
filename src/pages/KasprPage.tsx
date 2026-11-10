@@ -33,6 +33,7 @@ export default function KasprPage() {
   const [confirming, setConfirming] = useState(false);
   const [tailoring, setTailoring] = useState(false);
   const [paste, setPaste] = useState<JobContext>(EMPTY);
+  const [fullDesc, setFullDesc] = useState(false);
 
   useEffect(() => {
     Promise.all([api.versions(), currentResume()])
@@ -134,6 +135,12 @@ export default function KasprPage() {
   const checks = useMemo(() => (shown && resume ? fitChecks(shown.job.description, resume.content) : []), [shown, resume]);
   const draft = shown ? versions.find((v) => v.status === "pending" && v.job_ids.includes(shown.id)) : undefined;
   const best = ranked[0];
+  // The description without the title/company lines it starts with.
+  const descLines = useMemo(() => {
+    if (!shown) return [];
+    const skip = new Set([shown.job.title, shown.job.company].filter(Boolean));
+    return shown.job.description.split("\n").map((l) => l.trim()).filter((l) => l && !skip.has(l));
+  }, [shown]);
   // No skills found in the posting: nothing to compare, so no percentages.
   const noSkills = !!best && best.match.covered.length + best.match.missing.length === 0;
 
@@ -141,6 +148,7 @@ export default function KasprPage() {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setConfirming(false);
+    setFullDesc(false);
     if (!panel.current) return;
     animate(panel.current.querySelector(".case-in") ?? [], { scale: [0.4, 1], opacity: [0, 1], rotate: [-12, 0], translateY: [-14, 0], ease: springy });
     enter(panel.current.querySelectorAll(".card"), 70);
@@ -310,7 +318,8 @@ export default function KasprPage() {
         ) : (
           <>
             {/* header */}
-            <section className="card flex items-center gap-5">
+            <section className="card flex flex-col gap-4">
+              <div className="flex items-center gap-5">
               <div className="case-in shrink-0 px-2"><Briefcase id={shown.id} size={72} /></div>
               <div className="min-w-0 flex-1">
                 <div className="font-mono text-[10px] tracking-widest text-muted">
@@ -324,6 +333,20 @@ export default function KasprPage() {
                 <h2 className="truncate text-xl font-semibold">{shown.job.title}</h2>
                 {shown.job.company && <div className="text-sm text-muted">{shown.job.company}</div>}
               </div>
+              </div>
+              {/* the job description KASPR read, right under the title */}
+              {descLines.length > 0 && (
+                <div className="border-t border-line pt-4">
+                  <div className="label mb-2">The job, as KASPR read it</div>
+                  <div className={`relative overflow-hidden text-sm leading-relaxed text-muted ${fullDesc ? "" : "max-h-44"}`}>
+                    {descLines.map((l, k) => <p key={k} className="mb-1">{l}</p>)}
+                    {!fullDesc && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16" style={{ background: "linear-gradient(to top, var(--color-panel), transparent)" }} />}
+                  </div>
+                  <button className="mt-2 text-xs text-kaspr underline" onClick={() => setFullDesc(!fullDesc)}>
+                    {fullDesc ? "Show less" : `Show the whole description (${descLines.length} lines)`}
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* which resume */}
@@ -407,10 +430,6 @@ export default function KasprPage() {
               </section>
             )}
 
-            <details className="card">
-              <summary className="cursor-pointer text-sm font-medium">The posting as KASPR read it</summary>
-              <pre className="mt-3 max-h-80 overflow-y-auto whitespace-pre-wrap font-sans text-xs leading-relaxed text-muted">{shown.job.description}</pre>
-            </details>
           </>
         )}
       </div>

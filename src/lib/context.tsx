@@ -21,7 +21,7 @@ export interface SeenJob {
 }
 
 /** Bump when KASPR's page reader improves, so jobs read the old way are read again. */
-export const READER_VERSION = 2;
+export const READER_VERSION = 4;
 
 export interface KasprState {
   conn: "off" | "connecting" | "needs_user" | "needs_approval" | "on";

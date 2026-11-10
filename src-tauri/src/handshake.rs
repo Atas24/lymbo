@@ -116,59 +116,67 @@ fn find_choice_js(pattern: &str) -> String {
 
 // The job's own text only: drops nav/header/footer/scripts, collapses whitespace,
 // skips repeated lines, and caps the length. Less text = cheaper AI calls.
-// Reads one job posting. Handshake shows the search results next to the job, so this picks
-// the job's own panel: the biggest block that isn't mostly a list of other jobs (a few "similar
-// jobs" links are fine). The title is the biggest text on that panel. Returns JSON
-// {title, company, text, marked}.
+// Reads the job that's open. Handshake's layout changes, so this doesn't depend on it:
+// 1. The title is the biggest short text on the page that isn't a link to another job.
+// 2. Every card that links to *another* job (the results list, "similar jobs") is hidden for
+//    the instant it takes to read the page, then shown again (too fast to ever appear on screen).
+// 3. What's left, starting at the title, is the job: header, "At a glance", the description.
+// Returns JSON {title, company, text, marked}.
 const PAGE_TEXT_JS: &str = r#"(() => {
   const JOB = /\/(?:jobs|job-search|postings)\/(\d+)/;
   const MARK = /responsibilit|qualification|requirement|about (?:the|this) (?:job|role|position|team|opportunity)|job description|what you.ll (?:do|bring|need)|what we.re looking|who you are|you have|duties|preferred|minimum|basic qualifications|at a glance|you will|skills/i;
   const here = (location.href.match(JOB) || [])[1] || (new URLSearchParams(location.search).get('jobId') || '');
-  const root = document.querySelector('main') || document.body;
-  const textOf = e => (e.innerText || '');
-  const otherJobLink = el => { const a = el.closest('a[href]'); const m = a && (a.getAttribute('href') || '').match(JOB); return !!(m && m[1] !== here); };
-  const otherLinks = e => [...e.querySelectorAll('a[href]')].filter(a => { const m = (a.getAttribute('href') || '').match(JOB); return m && m[1] !== here; }).length;
-  const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-  // 1. Title: the biggest short text on the page that isn't a link to another job.
-  const GENERIC = /^(jobs|job search|search|saved|at a glance|about|overview|apply|save|share)$/i;
+  const root = document.body;
+  const clean = t => (t || '').replace(/\s+/g, ' ').trim();
+  const otherId = a => { const m = (a.getAttribute('href') || '').match(JOB); return m && m[1] !== here ? m[1] : null; };
+  const otherJobLink = el => { const a = el.closest('a[href]'); return !!(a && otherId(a)); };
+  const ids = el => new Set([...el.querySelectorAll('a[href]')].map(otherId).filter(Boolean)).size;
+
+  // 1. Title
+  const GENERIC = /^(jobs|job search|search|saved|at a glance|about|overview|apply|apply externally|save|share)$/i;
   let titleEl = null, titleSize = 0;
   for (const el of root.querySelectorAll('h1, h2, h3, h4, div, span, p, a')) {
-    if (el.children.length > 2 || otherJobLink(el) || !visible(el)) continue;
-    const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+    if (el.children.length > 2 || otherJobLink(el) || el.closest('nav')) continue;
+    const t = clean(el.innerText);
     if (t.length < 4 || t.length > 150 || GENERIC.test(t)) continue;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
     const size = parseFloat(getComputedStyle(el).fontSize) || 0;
     if (size > titleSize + 0.5) { titleEl = el; titleSize = size; }
   }
-  // 2. Section headings every posting has. The results list never contains these.
-  const HEAD = /^(at a glance|about (?:the|this) (?:role|job|position|team|opportunity)|job description|description|responsibilities|key responsibilities|qualifications|requirements|(?:minimum|basic|required|preferred) qualifications|what you.ll (?:do|bring|need)|what we.re looking for|who you are|about you|skills|benefits)\b/i;
-  const heads = [...root.querySelectorAll('h1, h2, h3, h4, h5, h6, div, span, p, strong, b, dt')].filter(el => {
-    if (el.children.length > 1 || otherJobLink(el)) return false;
-    const t = (el.innerText || '').trim();
-    return t.length < 60 && HEAD.test(t);
-  });
-  // 3. The job panel: the smallest block holding the title and all those headings.
-  const lca = els => {
-    if (!els.length) return null;
-    let a = els[0];
-    for (const el of els.slice(1)) while (a && !a.contains(el)) a = a.parentElement;
-    return a;
-  };
-  let best = lca([titleEl, ...heads].filter(Boolean));
-  if (!best || !heads.length) {
-    // No headings found: grow from the title while that doesn't pull in a list of other jobs.
-    best = titleEl || root;
-    while (best !== root && best.parentElement && otherLinks(best.parentElement) <= 3) best = best.parentElement;
+  const title = titleEl ? clean(titleEl.innerText) : clean((document.title || '').split('|')[0]);
+
+  // 2. Hide other jobs' cards just long enough to read the page.
+  const hidden = [];
+  for (const a of root.querySelectorAll('a[href]')) {
+    if (!otherId(a)) continue;
+    let card = a;
+    while (card.parentElement && card.parentElement !== root && !(titleEl && card.parentElement.contains(titleEl)) && ids(card.parentElement) <= 1) card = card.parentElement;
+    if (titleEl && card.contains(titleEl)) continue;
+    hidden.push([card, card.style.display]);
+    card.style.display = 'none';
   }
-  if (!root.contains(best)) best = root;
+  let all = '';
+  try { all = root.innerText || ''; } finally { for (const [c, d] of hidden) c.style.display = d; }
+
+  // 3. From the title on (the last time it appears: a selected card in the list can repeat it),
+  //    up to any "similar jobs" style section.
+  const lines = all.split('\n').map(clean).filter(l => l.length > 1);
+  let start = title ? lines.lastIndexOf(title) : -1;
+  if (start < 0) start = 0;
+  const STOP = /^(similar jobs|more jobs|more jobs like this|jobs you might like|people also viewed|recommended (?:jobs|for you)|explore more jobs)\b/i;
+  let end = lines.findIndex((l, k) => k > start && STOP.test(l));
+  if (end < 0) end = lines.length;
   const seen = new Set();
-  const lines = textOf(best).split('\n')
-    .map(l => l.replace(/\s+/g, ' ').trim())
-    .filter(l => l.length > 1 && !seen.has(l) && seen.add(l));
-  const title = titleEl ? titleEl.innerText.replace(/\s+/g, ' ').trim() : (document.title || '').split('|')[0].trim();
-  const emp = best.querySelector('a[href*="/employers/"], a[href*="/e/"]') || root.querySelector('a[href*="/employers/"], a[href*="/e/"]');
-  const company = emp ? emp.innerText.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
-  const text = lines.join('\n').slice(0, 9000);
-  return JSON.stringify({ title: title.slice(0, 140), company, text, marked: MARK.test(text) });
+  const body = lines.slice(start, end).filter(l => !seen.has(l) && seen.add(l));
+  // Company: the employer link, else the short line right above the title.
+  const emp = (titleEl && titleEl.parentElement && titleEl.closest('div, section, article') || root).querySelector('a[href*="/employers/"], a[href*="/e/"]')
+    || root.querySelector('a[href*="/employers/"], a[href*="/e/"]');
+  let company = emp ? clean(emp.innerText) : '';
+  const prev = start > 0 ? lines[start - 1] : '';
+  if (!company && prev && prev.length < 60 && !/[$•·|]|\d/.test(prev) && !GENERIC.test(prev)) company = prev;
+  const text = body.join('\n').slice(0, 9000);
+  return JSON.stringify({ title: title.slice(0, 140), company: company.slice(0, 80), text, marked: MARK.test(text) });
 })()"#;
 
 #[derive(serde::Deserialize, Default)]
@@ -528,6 +536,34 @@ mod tests {
         // only Handshake pages count in the app
         tab.navigate_to(&format!("{dir}/split.html?jobId=222")).unwrap().wait_until_navigated().unwrap();
         assert!(watch_tabs(&[tab], &[], is_handshake, &cancel).unwrap().id.is_none());
+    }
+
+    #[test]
+    fn reads_description_wherever_it_sits() {
+        let Some((_b, tab)) = browser() else { return };
+        tab.navigate_to(concat!("file://", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/handshake2025c.html?jobId=5")).unwrap().wait_until_navigated().unwrap();
+        let page = extract(&tab).unwrap();
+        assert_eq!(page.title, "Data Analyst");
+        assert_eq!(page.company, "Hipp Health");
+        assert!(page.text.contains("Tableau dashboards"), "description missing: {}", page.text);
+        assert!(page.text.contains("$70K/yr"));
+        assert!(!page.text.contains("Barista"), "results list leaked in: {}", page.text);
+        assert!(!page.text.contains("Other Co"), "similar jobs leaked in: {}", page.text);
+        // the page looks the same afterwards
+        let shown = eval_string(&tab, "String([...document.querySelectorAll('.card')].every(c => c.style.display === ''))").unwrap();
+        assert_eq!(shown, "true");
+    }
+
+    #[test]
+    fn reads_the_whole_job_pane() {
+        let Some((_b, tab)) = browser() else { return };
+        tab.navigate_to(concat!("file://", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/handshake2025b.html?jobId=11917034")).unwrap().wait_until_navigated().unwrap();
+        let page = extract(&tab).unwrap();
+        assert_eq!(page.title, "Shift Manager - AI Company");
+        assert_eq!(page.company, "Allied Universal");
+        assert!(page.text.contains("$125–134K/yr"));
+        assert!(page.text.contains("operational metrics and KPIs"), "description missing: {}", page.text);
+        assert!(!page.text.contains("Barista"), "results list leaked in: {}", page.text);
     }
 
     #[test]
