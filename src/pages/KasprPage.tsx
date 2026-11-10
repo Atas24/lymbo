@@ -7,7 +7,7 @@ import { Briefcase } from "../components/Briefcase";
 import { KasprBoxing } from "../components/KasprBoxing";
 import { api, currentResume, errText } from "../lib/api";
 import { tailorForJob } from "../lib/tailor";
-import { useApp, type SeenJob } from "../lib/context";
+import { READER_VERSION, useApp, type SeenJob } from "../lib/context";
 import { keywordsIn, rankResumes, whyBest, VERSION_FIT, type RankedResume, type ResumeOption } from "../lib/keywords";
 import { fitChecks, type FitCheck } from "../lib/requirements";
 import { enter, popIn, springy } from "../lib/motion";
@@ -134,6 +134,8 @@ export default function KasprPage() {
   const checks = useMemo(() => (shown && resume ? fitChecks(shown.job.description, resume.content) : []), [shown, resume]);
   const draft = shown ? versions.find((v) => v.status === "pending" && v.job_ids.includes(shown.id)) : undefined;
   const best = ranked[0];
+  // No skills found in the posting: nothing to compare, so no percentages.
+  const noSkills = !!best && best.match.covered.length + best.match.missing.length === 0;
 
   // New job: the analysis slides in, chips pop.
   const panel = useRef<HTMLDivElement>(null);
@@ -195,7 +197,7 @@ export default function KasprPage() {
 
   const analyzePasted = () => {
     const id = `pasted-${Date.now()}`;
-    addSeen({ id, job: { ...paste, title: paste.title.trim() || "Pasted job", company: paste.company.trim() }, seenAt: Date.now() });
+    addSeen({ id, job: { ...paste, title: paste.title.trim() || "Pasted job", company: paste.company.trim() }, seenAt: Date.now(), reader: READER_VERSION });
     setKaspr({ pinned: id });
     setPaste(EMPTY);
   };
@@ -328,7 +330,7 @@ export default function KasprPage() {
             <section data-tour="resume-pick" className="card flex flex-col gap-4">
               <div className="flex items-baseline justify-between">
                 <h3 className="label mb-0">Resume to use</h3>
-                {best && <span className="font-mono text-xs text-muted">covers {pct(best.match.coverage)} of this job's skills</span>}
+                {best && !noSkills && <span className="font-mono text-xs text-muted">covers {pct(best.match.coverage)} of this job's skills</span>}
               </div>
               {!best ? (
                 <p className="text-sm text-muted">Add your resume in the Control Room and KASPR will compare it to this job.</p>
@@ -344,7 +346,7 @@ export default function KasprPage() {
                     </span>
                   </div>
                   <p className="text-sm leading-relaxed">{whyBest(ranked)}</p>
-                  {ranked.length > 1 && (
+                  {ranked.length > 1 && !noSkills && (
                     <ul className="flex flex-col gap-1.5 border-t border-line pt-3">
                       {ranked.map((r) => (
                         <li key={r.option.key} className="flex items-center gap-3 text-sm">

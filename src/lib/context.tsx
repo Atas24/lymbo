@@ -16,7 +16,12 @@ export interface SeenJob {
   /** description = the whole posting as KASPR read it */
   job: JobContext;
   seenAt: number;
+  /** Which version of KASPR's page reader read it; older reads get read again. */
+  reader?: number;
 }
+
+/** Bump when KASPR's page reader improves, so jobs read the old way are read again. */
+export const READER_VERSION = 2;
 
 export interface KasprState {
   conn: "off" | "connecting" | "needs_user" | "needs_approval" | "on";

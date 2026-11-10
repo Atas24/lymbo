@@ -10,7 +10,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errText, fmtDuration, fmtUsd } from "./lib/api";
-import { Ctx, KASPR_INITIAL, type AppCtx, type KasprState, type SeenJob, type Toast } from "./lib/context";
+import { Ctx, KASPR_INITIAL, READER_VERSION, type AppCtx, type KasprState, type SeenJob, type Toast } from "./lib/context";
 import type { AgentName, JobContext, Page, SessionStatus } from "./lib/types";
 import { AgentDock } from "./components/AgentDock";
 import { Toasts } from "./components/Toasts";
@@ -174,13 +174,14 @@ export default function App() {
     (async () => {
       while (!stop) {
         try {
-          const known = kasprRef.current.seen.map((j) => j.id);
+          // Jobs read by an older version of the page reader count as unread, so they get a fresh read.
+          const known = kasprRef.current.seen.filter((j) => (j.reader ?? 1) >= READER_VERSION).map((j) => j.id);
           const w = await api.hsWatch(known);
           if (stop) break;
           if (w.page && w.id) {
             const p = w.page;
             const job = { title: p.title || "Untitled job", company: p.company, url: p.url, description: p.text };
-            addSeen({ id: w.id, job, seenAt: Date.now() });
+            addSeen({ id: w.id, job, seenAt: Date.now(), reader: READER_VERSION });
             if (pageNow.current !== "kaspr") {
               notify({
                 from: "KASPR",
