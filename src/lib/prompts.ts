@@ -78,6 +78,9 @@ from each other, each built around its own focus keywords:
 - Keep each changed line within ~15% of its original length. Don't change names, contact info,
   headings, dates or [fixed] lines.
 - 5 to 12 edits per group. Plain, direct wording, no buzzwords.
+- When a group includes the posting itself, tailor to the whole posting, not only the keywords listed:
+  lead with the experience most relevant to that job and use the posting's wording for things the resume
+  already shows. A short keyword list is never a reason to skip; there is always something to sharpen.
 
 Return only this JSON:
 {"groups": [{"group": "<G1, G2, ...>", "label": "<short role name, e.g. Data Analyst>",

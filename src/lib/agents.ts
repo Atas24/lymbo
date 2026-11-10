@@ -46,9 +46,11 @@ export async function sonnyBatch(lines: ResumeLine[], groups: BatchGroupInput[])
   const byP = new Map(lines.map((l) => [l.p, l]));
   const keys = new Set(groups.map((g) => g.key));
   return (v.groups ?? [])
-    .filter((g) => keys.has(String(g.group)))
+    // One job: whatever SONNY called the group, it's that job's.
+    .map((g) => ({ ...g, group: groups.length === 1 ? groups[0].key : String(g.group ?? "").toUpperCase().replace(/^(\d+)$/, "G$1") }))
+    .filter((g) => keys.has(g.group))
     .map((g) => ({
-      key: String(g.group),
+      key: g.group,
       label: String(g.label || "Tailored").slice(0, 40),
       summary: String(g.summary || ""),
       edits: (g.edits ?? [])

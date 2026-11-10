@@ -45,10 +45,14 @@ function workSetup(job: string): string | null {
   return null;
 }
 
+const STATES = new Set(("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY " +
+  "NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC").split(" "));
 function place(job: string): string | null {
-  for (const l of lines(job).slice(0, 30)) {
-    const m = l.match(/\b([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+){0,3}, (?:[A-Z]{2}|[A-Z][a-z]+(?: [A-Z][a-z]+)?))\b/);
-    if (m && l.length < 120) return m[1];
+  for (const l of lines(job).slice(0, 40)) {
+    if (l.length > 120) continue;
+    for (const m of l.matchAll(/\b([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+){0,3}), ([A-Z]{2})\b/g)) {
+      if (STATES.has(m[2])) return `${m[1]}, ${m[2]}`;
+    }
   }
   return null;
 }

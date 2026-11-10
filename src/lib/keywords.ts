@@ -41,6 +41,10 @@ const GROUPS: string[][] = [
   ["Competitive analysis", "competitor analysis", "competitive landscape"], ["Market sizing"], ["Business development"],
   ["Negotiation", "negotiating"], ["Social media", "social media marketing"], ["Content marketing", "content creation"], ["Copywriting"],
   ["Process improvement", "process optimization"], ["Strategy", "strategic planning", "business strategy"],
+  ["AI", "=AI", "artificial intelligence", "ai-powered", "ai tools", "ai models"], ["AI tools", "chatgpt", "copilot", "openai", "anthropic", "gemini"],
+  ["Prompt engineering", "prompting", "prompt design"], ["Analytics", "analytics", "analytical"], ["Automation", "automate", "automating", "automated", "workflow automation"],
+  ["Data quality", "data integrity", "data validation"], ["Process documentation", "process mapping", "standard operating procedures", "sops"],
+  ["Google Workspace", "g suite", "google docs", "google slides"], ["Airtable"], ["Zapier"], ["Data entry"], ["Market analysis"],
   // research / general
   ["Research", "research experience"], ["Literature review"], ["Technical writing", "documentation"], ["Presentations", "presenting", "public speaking"],
   ["Communication", "communication skills", "written and verbal"], ["Teamwork", "collaboration", "collaborative", "team player"],
