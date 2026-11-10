@@ -18,10 +18,6 @@ use crate::keys::HandshakeLogin;
 
 pub const BASE: &str = "https://app.joinhandshake.com";
 
-/// Where KASPR tries to search. Handshake changes its URLs now and then; if none
-/// of these show job links, KASPR asks the user to search by hand instead.
-const SEARCH_URLS: &[&str] = &["/job-search?query=", "/stu/postings?query="];
-
 #[derive(Default)]
 pub struct Handshake {
     browser: Option<Browser>,
@@ -35,13 +31,6 @@ pub struct LoginOutcome {
     pub message: String,
     /// For "needs_approval": the login page host KASPR wants to type into.
     pub host: Option<String>,
-}
-
-#[derive(Serialize, Clone)]
-pub struct JobLink {
-    pub id: String,
-    pub url: String,
-    pub text: String,
 }
 
 #[derive(Serialize)]
@@ -69,16 +58,6 @@ pub fn host_of(url: &str) -> String {
 pub fn is_handshake(url: &str) -> bool {
     let h = host_of(url);
     url.starts_with("https://") && (h == "joinhandshake.com" || h.ends_with(".joinhandshake.com"))
-}
-
-fn encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            b' ' => "+".into(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
 
 /// Sleeps a random amount in [min, max] ms, checking the kill switch as it goes.
@@ -134,18 +113,6 @@ fn find_choice_js(pattern: &str) -> String {
 }})()"#
     )
 }
-
-const COLLECT_LINKS_JS: &str = r#"(() => {
-  const seen = new Map();
-  for (const a of document.querySelectorAll('a[href]')) {
-    const m = a.href.match(/\/(?:stu\/)?(?:jobs|job-search|postings)\/(\d+)/);
-    if (!m) continue;
-    const text = (a.innerText || a.getAttribute('aria-label') || '')
-      .split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n').slice(0, 300);
-    if (!seen.has(m[1]) || text.length > seen.get(m[1]).length) seen.set(m[1], text);
-  }
-  return JSON.stringify([...seen].map(([id, text]) => ({ id, text })));
-})()"#;
 
 // The job's own text only: drops nav/header/footer/scripts, collapses whitespace,
 // skips repeated lines, and caps the length. Less text = cheaper AI calls.
@@ -381,84 +348,93 @@ impl Handshake {
         Ok(Self::logged_in(&*self.tab()?))
     }
 
-    fn collect_links(tab: &Tab, cancel: &AtomicBool) -> Result<Vec<JobLink>, String> {
-        // Job lists load after the page does, so give them a few seconds.
-        for _ in 0..8 {
-            check(cancel)?;
-            #[derive(serde::Deserialize)]
-            struct L {
-                id: String,
-                text: String,
-            }
-            let raw: Vec<L> = serde_json::from_str(&eval_string(tab, COLLECT_LINKS_JS)?).unwrap_or_default();
-            if !raw.is_empty() {
-                return Ok(raw
-                    .into_iter()
-                    .map(|l| JobLink { url: format!("{BASE}/jobs/{}", l.id), id: l.id, text: l.text })
-                    .collect());
-            }
-            pause(cancel, 1000, 1000)?;
-        }
-        Ok(vec![])
+    /// The job you're looking at right now: the visible Handshake tab that's on a job.
+    /// Nothing happens on Handshake's side; KASPR only reads what's already on your screen.
+    /// Returns the job's id, plus the page itself when it isn't one of the `known` jobs KASPR already read.
+    pub fn watch(&self, known: &[String], cancel: &AtomicBool) -> Result<Watch, String> {
+        let browser = self.browser.as_ref().ok_or("Handshake isn't connected. Click Connect first.")?;
+        let tabs = browser.get_tabs().lock().map(|t| t.clone()).unwrap_or_default();
+        watch_tabs(&tabs, known, is_handshake, cancel)
     }
+}
 
-    pub fn search(&self, query: &str, cancel: &AtomicBool) -> Result<Vec<JobLink>, String> {
-        let tab = self.tab()?;
-        for path in SEARCH_URLS {
-            self.goto(&tab, &format!("{BASE}{path}{}", encode(query)), cancel)?;
-            if !Self::logged_in(&tab) {
-                return Err("Handshake signed you out. Click Connect again.".into());
-            }
-            let links = Self::collect_links(&tab, cancel)?;
-            if !links.is_empty() {
-                return Ok(links);
-            }
-        }
-        Ok(vec![])
-    }
+#[derive(Serialize, Default)]
+pub struct Watch {
+    /// Id of the job on screen, or None when no job is open.
+    pub id: Option<String>,
+    /// Only filled for a job KASPR hasn't read yet.
+    pub page: Option<JobPage>,
+}
 
-    /// Reads job links off whatever Handshake page the user has open.
-    pub fn links_on_page(&self, cancel: &AtomicBool) -> Result<Vec<JobLink>, String> {
-        let tab = self.tab()?;
-        if !is_handshake(&tab.get_url()) {
-            return Err("The Chrome window isn't on Handshake.".into());
-        }
-        Self::collect_links(&tab, cancel)
-    }
-
-    pub fn read_job(&self, url: &str, cancel: &AtomicBool) -> Result<JobPage, String> {
-        let tab = self.tab()?;
-        self.goto(&tab, url, cancel)?;
-        if !Self::logged_in(&tab) {
-            return Err("Handshake signed you out. Click Connect again.".into());
-        }
-        // Wait for the description to load: stop once it has the usual sections
-        // (Responsibilities, Qualifications…), or settle for whatever is there after ~10s.
-        let mut page = Extract::default();
-        for i in 0..10 {
-            check(cancel)?;
-            page = extract(&tab)?;
-            if page.marked || (i >= 5 && page.text.len() > 600) {
-                break;
+/// The job id in a Handshake job URL: /jobs/123, /job-search/123, /postings/123, or ?jobId=123.
+pub fn job_id_of(url: &str) -> Option<String> {
+    let digits = |rest: &str| -> Option<String> {
+        let d: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        (!d.is_empty()).then_some(d)
+    };
+    for key in ["/jobs/", "/job-search/", "/postings/"] {
+        if let Some(i) = url.find(key) {
+            if let Some(d) = digits(&url[i + key.len()..]) {
+                return Some(d);
             }
-            pause(cancel, 1000, 1000)?;
         }
-        if page.text.trim().is_empty() {
-            return Err("KASPR couldn't read this job page. Check the Chrome window.".into());
-        }
-        Ok(JobPage { url: tab.get_url(), title: page.title, company: page.company, text: page.text })
     }
+    url.find("jobId=").and_then(|i| digits(&url[i + 6..]))
+}
 
-    /// Shows a job in the Chrome window so the user can apply themselves.
-    pub fn open(&self, url: &str, cancel: &AtomicBool) -> Result<(), String> {
-        let tab = self.tab()?;
-        if tab.get_url() != url {
-            self.goto(&tab, url, cancel)?;
+const VIEW_JS: &str = r#"JSON.stringify({ href: location.href, visible: document.visibilityState === 'visible', focus: document.hasFocus() })"#;
+
+#[derive(serde::Deserialize)]
+struct View {
+    href: String,
+    visible: bool,
+    focus: bool,
+}
+
+fn watch_tabs(tabs: &[Arc<Tab>], known: &[String], allowed: fn(&str) -> bool, cancel: &AtomicBool) -> Result<Watch, String> {
+    check(cancel)?;
+    // Visible tabs on a job; the focused one wins if Chrome has several windows.
+    let mut best: Option<(Arc<Tab>, String, bool)> = None;
+    let mut answered = false;
+    for t in tabs {
+        let Ok(raw) = eval_string(t, VIEW_JS) else { continue };
+        answered = true;
+        let Ok(v) = serde_json::from_str::<View>(&raw) else { continue };
+        if !v.visible || !allowed(&v.href) {
+            continue;
         }
-        let _ = tab.bring_to_front();
-        let _ = tab.activate();
-        Ok(())
+        let Some(id) = job_id_of(&v.href) else { continue };
+        if best.as_ref().map(|b| !b.2 && v.focus).unwrap_or(true) {
+            best = Some((t.clone(), id, v.focus));
+        }
     }
+    if !answered {
+        return Err("Handshake isn't connected: the Chrome window was closed.".into());
+    }
+    let Some((tab, id, _)) = best else { return Ok(Watch::default()) };
+    if known.contains(&id) {
+        return Ok(Watch { id: Some(id), page: None });
+    }
+    // A new job: wait for its description to load (the usual sections, or ~8s), and stop
+    // if you click to a different job in the meantime.
+    let mut page = Extract::default();
+    for i in 0..8 {
+        check(cancel)?;
+        page = extract(&tab)?;
+        if page.marked || (i >= 4 && page.text.len() > 600) {
+            break;
+        }
+        pause(cancel, 1000, 1000)?;
+        let now = eval_string(&tab, "location.href").unwrap_or_default();
+        if job_id_of(&now).as_deref() != Some(id.as_str()) {
+            return Ok(Watch::default()); // moved on; the next check picks up the new one
+        }
+    }
+    if page.text.trim().is_empty() {
+        return Ok(Watch { id: Some(id), page: None });
+    }
+    let url = eval_string(&tab, "location.href").unwrap_or_default();
+    Ok(Watch { id: Some(id), page: Some(JobPage { url, title: page.title, company: page.company, text: page.text }) })
 }
 
 #[cfg(test)]
@@ -488,7 +464,12 @@ mod tests {
         assert!(is_handshake("https://app.joinhandshake.com/jobs/1"));
         assert!(!is_handshake("https://joinhandshake.com.evil.io/"));
         assert!(!is_handshake("http://app.joinhandshake.com/"));
-        assert_eq!(encode("data analyst & ml"), "data+analyst+%26+ml");
+        assert_eq!(job_id_of("https://app.joinhandshake.com/jobs/123?searchId=9").as_deref(), Some("123"));
+        assert_eq!(job_id_of("https://app.joinhandshake.com/job-search/456?page=1").as_deref(), Some("456"));
+        assert_eq!(job_id_of("https://app.joinhandshake.com/stu/postings/78").as_deref(), Some("78"));
+        assert_eq!(job_id_of("https://app.joinhandshake.com/job-search?query=x&jobId=99").as_deref(), Some("99"));
+        assert_eq!(job_id_of("https://app.joinhandshake.com/job-search?query=analyst"), None);
+        assert_eq!(job_id_of("https://app.joinhandshake.com/employers/5"), None);
     }
 
     #[test]
@@ -512,17 +493,26 @@ mod tests {
     }
 
     #[test]
-    fn job_links() {
+    fn watches_the_open_job() {
         let Some((_b, tab)) = browser() else { return };
-        tab.navigate_to(concat!("file://", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/jobs.html")).unwrap().wait_until_navigated().unwrap();
+        let dir = concat!("file://", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
         let cancel = AtomicBool::new(false);
-        let links = Handshake::collect_links(&tab, &cancel).unwrap();
-        let ids: Vec<_> = links.iter().map(|l| l.id.as_str()).collect();
-        assert_eq!(ids, vec!["111", "222"]);
-        assert_eq!(links[0].url, "https://app.joinhandshake.com/jobs/111");
-        assert!(links[0].text.contains("Data Analyst Intern"));
-        let page = extract(&tab).unwrap();
-        assert!(page.text.contains("Some job text"));
+        let any: fn(&str) -> bool = |_| true;
+        tab.navigate_to(&format!("{dir}/split.html?jobId=222")).unwrap().wait_until_navigated().unwrap();
+        let w = watch_tabs(&[tab.clone()], &[], any, &cancel).unwrap();
+        assert_eq!(w.id.as_deref(), Some("222"));
+        let page = w.page.expect("a new job is read");
+        assert_eq!(page.title, "Commercial Group Analyst (Acquisitions)");
+        assert!(page.text.contains("underwriting"));
+        // same job again: nothing new to read
+        let again = watch_tabs(&[tab.clone()], &["222".to_string()], any, &cancel).unwrap();
+        assert!(again.id.is_some() && again.page.is_none());
+        // a page that isn't a job
+        tab.navigate_to(&format!("{dir}/login.html")).unwrap().wait_until_navigated().unwrap();
+        assert!(watch_tabs(&[tab.clone()], &[], any, &cancel).unwrap().id.is_none());
+        // only Handshake pages count in the app
+        tab.navigate_to(&format!("{dir}/split.html?jobId=222")).unwrap().wait_until_navigated().unwrap();
+        assert!(watch_tabs(&[tab], &[], is_handshake, &cancel).unwrap().id.is_none());
     }
 
     #[test]

@@ -645,24 +645,10 @@ pub async fn handshake_check(state: State<'_, AppState>) -> Result<bool, String>
     with_browser(&state, |h, _| h.check_logged_in()).await
 }
 
+/// What job is open in KASPR's Chrome window. The app asks every couple of seconds.
 #[tauri::command]
-pub async fn handshake_search(state: State<'_, AppState>, query: String) -> Result<Vec<handshake::JobLink>, String> {
-    with_browser(&state, move |h, cancel| h.search(&query, cancel)).await
-}
-
-#[tauri::command]
-pub async fn handshake_links_on_page(state: State<'_, AppState>) -> Result<Vec<handshake::JobLink>, String> {
-    with_browser(&state, |h, cancel| h.links_on_page(cancel)).await
-}
-
-#[tauri::command]
-pub async fn handshake_read_job(state: State<'_, AppState>, url: String) -> Result<handshake::JobPage, String> {
-    with_browser(&state, move |h, cancel| h.read_job(&url, cancel)).await
-}
-
-#[tauri::command]
-pub async fn handshake_open(state: State<'_, AppState>, url: String) -> Result<(), String> {
-    with_browser(&state, move |h, cancel| h.open(&url, cancel)).await
+pub async fn handshake_watch(state: State<'_, AppState>, known: Vec<String>) -> Result<handshake::Watch, String> {
+    with_browser(&state, move |h, cancel| h.watch(&known, cancel)).await
 }
 
 #[tauri::command]

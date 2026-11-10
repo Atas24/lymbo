@@ -1,6 +1,5 @@
 import { createContext, useContext } from "react";
-import type { AgentName, JobContext, JobLink, Page, SessionStatus } from "./types";
-import type { KeywordMatch } from "./keywords";
+import type { AgentName, JobContext, Page, SessionStatus } from "./types";
 
 export interface Toast {
   id: number;
@@ -10,44 +9,36 @@ export interface Toast {
   action?: { label: string; run: () => void };
 }
 
-/** A job from KASPR's search. Listed right away; KASPR fills in the details as it reads each page. */
-export interface BatchJob {
-  link: JobLink;
-  /** Title/company come from the search listing; description from the job page once read. */
-  job: JobContext & { location: string };
-  read: boolean;
-  failed: boolean;
-  /** When KASPR finished reading it; jobs are shown in this order. */
-  readAt: number | null;
-  /** Trimmed text of the job page, for local keyword matching. */
-  pageText: string;
-  /** Local keyword check against your resume (null until read). */
-  match: KeywordMatch | null;
-  /** Version to use (approved), or SONNY's proposed version still waiting for the user's OK. */
-  versionId: number | null;
-  /** Keyword coverage of the chosen version, 0-1. */
-  versionCoverage: number | null;
+/** A job KASPR read: one you opened on Handshake, or one you pasted in. */
+export interface SeenJob {
+  /** Handshake's job id, or "pasted-<time>". */
+  id: string;
+  /** description = the whole posting as KASPR read it */
+  job: JobContext;
+  seenAt: number;
 }
 
 export interface KasprState {
   conn: "off" | "connecting" | "needs_user" | "needs_approval" | "on";
   connMsg: string;
   pendingHost: string | null;
-  jobs: BatchJob[];
-  selectedId: string | null;
-  /** Background reading of the job pages. */
-  reading: "idle" | "reading" | "paused";
+  /** Jobs KASPR has read, newest first. */
+  seen: SeenJob[];
+  /** Id of the job open in the Chrome window right now. */
+  onScreen: string | null;
+  /** A job you picked from the list; null = show whatever's on screen. */
+  pinned: string | null;
 }
 
 export const KASPR_INITIAL: KasprState = {
-  conn: "off", connMsg: "", pendingHost: null, jobs: [], selectedId: null, reading: "idle",
+  conn: "off", connMsg: "", pendingHost: null, seen: [], onScreen: null, pinned: null,
 };
 
 export interface AppCtx {
   kaspr: KasprState;
   setKaspr: (patch: Partial<KasprState>) => void;
-  /** Update jobs from the latest state (safe while KASPR reads in the background). */
-  updateJobs: (fn: (jobs: BatchJob[]) => BatchJob[]) => void;
+  /** Adds a job KASPR read (or you pasted) to the top of the list. */
+  addSeen: (j: SeenJob) => void;
   /** Starts the guided tour (also from Settings). */
   startTour: () => void;
   session: SessionStatus;
@@ -62,9 +53,6 @@ export interface AppCtx {
   /** Job KASPR handed to SONNY for a workshop. */
   workshopJob: JobContext | null;
   setWorkshopJob: (j: JobContext | null) => void;
-  /** Where the user said they want to work, confirmed this session (null = KASPR still needs to ask). */
-  location: { text: string; summary: string } | null;
-  setLocation: (l: { text: string; summary: string } | null) => void;
   /** Bumped whenever Control Room data changes, so views can reload. */
   dataVersion: number;
   bumpData: () => void;

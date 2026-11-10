@@ -17,12 +17,12 @@ export const TOUR: TourStep[] = [
   {
     target: "nav",
     title: "Four screens",
-    body: "Control Room is your library. KASPR finds jobs on Handshake. SONNY tailors your resume. Settings holds your API key and limits.",
+    body: "Control Room is your library. KASPR checks the jobs you open on Handshake. SONNY tailors your resume and writes cover letters. Settings holds your API key and limits.",
   },
   {
     page: "settings", target: "apikey",
     title: "First: your API key",
-    body: "KASPR and SONNY run on your own Anthropic API key (from console.anthropic.com). It's saved in your Mac's Keychain, and you pay Anthropic directly, usually around a cent per batch of jobs.",
+    body: "SONNY runs on your own Anthropic API key (from console.anthropic.com). It's saved in your Mac's Keychain, and you pay Anthropic directly: a few cents per tailored resume or cover letter. KASPR's checks run on your computer and are free.",
   },
   {
     page: "control", target: "resumes",
@@ -37,12 +37,12 @@ export const TOUR: TourStep[] = [
   {
     page: "control", target: "timeline",
     title: "Application timeline",
-    body: "Every job you tell KASPR you applied to lands here, with the resume version you used. Update the status as you hear back.",
+    body: "Every job you tell KASPR you applied to lands here, with the resume you used. Update the status as you hear back.",
   },
   {
     page: "control", target: "killswitch",
     title: "The kill switch",
-    body: "Stops everything right away: ends the session, stops KASPR mid-step and closes its Chrome window.",
+    body: "Stops everything right away: ends the session, stops KASPR and closes his Chrome window.",
   },
   {
     target: "session",
@@ -52,32 +52,27 @@ export const TOUR: TourStep[] = [
   {
     page: "kaspr", target: "handshake",
     title: "Connect Handshake",
-    body: "Save your Handshake login once; it stays in your Keychain. KASPR signs you in through a Chrome window. If your school uses Duo, approve it, then click \"I'm signed in\".",
+    body: "Save your Handshake login once; it stays in your Keychain. KASPR opens a Chrome window and signs you in. If your school uses Duo, approve it, then click \"I'm signed in\".",
   },
   {
-    page: "kaspr", target: "findjobs",
-    title: "Tell KASPR what you want",
-    body: "Pick where, and internships or full-time, then hit Find jobs. No typing: KASPR works out the searches from your resume.",
+    page: "kaspr", target: "analysis",
+    title: "Open any job",
+    body: "Browse Handshake in that Chrome window like you normally would. The moment you open a job, KASPR reads it and shows it here: which resume to use and why, the skills you have and the ones you're missing, and details like degree, graduation date, GPA and pay checked against your resume. He never clicks or browses on his own.",
   },
   {
-    page: "kaspr", target: "slider",
-    title: "How specific",
-    body: "Slide toward Specific to only see jobs your resume closely matches, or toward Broad to see everything. You can change it anytime.",
+    page: "kaspr", target: "sonny-actions",
+    title: "SONNY, on every job",
+    body: "Tailor with SONNY drafts a version of your resume for the job. Cover letter with SONNY writes one for it. When you've applied, click I applied and it goes in your timeline.",
   },
   {
-    page: "kaspr", target: "cockpit",
-    title: "The cockpit",
-    body: "KASPR flies you through the jobs one at a time. Each planet is a job; the dashboard shows which resume to use and how well it matches. Hit Next planet (or the → key) to fly to the next one. If none of your resumes fit, click Work with SONNY. To tailor your resume for just one posting, use Work with SONNY on this job.",
-  },
-  {
-    page: "sonny", target: "versions",
-    title: "SONNY's resume versions",
-    body: "After a batch, SONNY groups the jobs by kind of role and drafts a version of your resume for each. Untick any change you don't want, then approve. From then on KASPR tells you which version to use for each job. You always click Apply yourself.",
+    page: "sonny", target: "desk",
+    title: "SONNY's desk",
+    body: "The job you're working on sits here. Pick Tailor my resume, Write a cover letter, or Quick check. Resumes SONNY drafts show up at the top: untick any change you don't want, then approve. Approved ones join your library, and KASPR checks every job against them. You always click Apply yourself.",
   },
   {
     page: "control",
     title: "You're ready",
-    body: "Add your API key, upload your resume, start a session, and find some jobs. You can replay this tour anytime from Settings.",
+    body: "Add your API key, upload your resume, start a session, connect Handshake and open a job. You can replay this tour anytime from Settings.",
   },
 ];
 

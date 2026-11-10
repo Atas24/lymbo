@@ -1,7 +1,7 @@
 // Thin typed wrappers around the Rust commands in src-tauri/src/commands.rs.
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AiResult, AgentName, Application, CoverLetter, Edit, JobLink, LoginOutcome, Resume, ResumeLine, ResumeVersion,
+  AiResult, AgentName, Application, CoverLetter, Edit, LoginOutcome, Resume, ResumeLine, ResumeVersion,
   SessionStatus, Settings, Stats,
 } from "./types";
 
@@ -75,10 +75,9 @@ export const api = {
   hsConnect: () => invoke<LoginOutcome>("handshake_connect"),
   hsApproveHost: (host: string) => invoke<void>("handshake_approve_host", { host }),
   hsCheck: () => invoke<boolean>("handshake_check"),
-  hsSearch: (query: string) => invoke<JobLink[]>("handshake_search", { query }),
-  hsLinksOnPage: () => invoke<JobLink[]>("handshake_links_on_page"),
-  hsReadJob: (url: string) => invoke<{ url: string; title: string; company: string; text: string }>("handshake_read_job", { url }),
-  hsOpen: (url: string) => invoke<void>("handshake_open", { url }),
+  /** The job open in KASPR's Chrome window; `page` is filled for jobs not in `known`. */
+  hsWatch: (known: string[]) =>
+    invoke<{ id: string | null; page: { url: string; title: string; company: string; text: string } | null }>("handshake_watch", { known }),
   hsDisconnect: () => invoke<void>("handshake_disconnect"),
 };
 

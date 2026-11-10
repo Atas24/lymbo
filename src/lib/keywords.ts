@@ -119,124 +119,56 @@ export function rankVersions<V extends { id: number; text: string; keywords: Rec
 /** A version is a good enough fit to use without asking SONNY. */
 export const VERSION_FIT = 0.6;
 
-// ---------- grouping a batch by keywords (local, free) ----------
-
-/** Soft skills nearly every posting lists; they shouldn't decide which group a job is in. */
-const GENERIC = new Set([
+/** Soft skills nearly every posting lists; they shouldn't decide how a resume gets tailored. */
+export const GENERIC = new Set([
   "Communication", "Teamwork", "Leadership", "Problem solving", "Attention to detail", "Time management",
   "Research", "Reporting", "Presentations", "Operations", "Customer service", "Mentoring", "KPIs",
 ]);
-const weightOf = (k: string, df: number, n: number) => Math.log((n + 1) / (df + 0.5)) * (GENERIC.has(k) ? 0.3 : 1);
 
-export interface JobKeywords {
-  id: string;
-  keywords: string[];
+// ---------- which resume to use for one job (local, free) ----------
+
+export interface ResumeOption {
+  /** "main" or "v<id>" */
+  key: string;
+  kind: "main" | "version";
+  id: number;
+  label: string;
+  text: string;
+  has_pdf: boolean;
+  has_docx: boolean;
 }
 
-export interface KeywordCluster {
-  jobIds: string[];
-  /** keyword -> how many jobs in this group ask for it */
-  counts: Record<string, number>;
-  /** What sets this group apart from the rest of the batch. SONNY tailors around these. */
-  focus: string[];
-  /** Asked for across the group but also common elsewhere. */
-  shared: string[];
+export interface RankedResume {
+  option: ResumeOption;
+  match: KeywordMatch;
 }
 
-/**
- * Groups jobs by the keywords they ask for. Rare, specific keywords (Power BI, biomechanics)
- * count more than ones every posting has (communication), so groups split along real
- * differences. Groups that end up too alike are merged.
- */
-export function clusterJobs(jobs: JobKeywords[], maxClusters = 4): KeywordCluster[] {
-  const n = jobs.length;
-  if (n === 0) return [];
-  const df: Record<string, number> = {};
-  for (const j of jobs) for (const k of new Set(j.keywords)) df[k] = (df[k] ?? 0) + 1;
-  const w = (k: string) => weightOf(k, df[k] ?? 0, n);
-
-  type G = { jobs: JobKeywords[]; counts: Record<string, number> };
-  const core = (g: G) => {
-    // keywords at least half the group asks for (all of them for a single job)
-    const need = Math.max(1, Math.ceil(g.jobs.length / 2));
-    return new Set(Object.keys(g.counts).filter((k) => g.counts[k] >= need));
-  };
-  const sim = (a: Set<string>, b: Set<string>) => {
-    let inter = 0, union = 0;
-    for (const k of new Set([...a, ...b])) {
-      union += w(k);
-      if (a.has(k) && b.has(k)) inter += w(k);
-    }
-    return union ? inter / union : 0;
-  };
-  const add = (g: G, j: JobKeywords) => {
-    g.jobs.push(j);
-    for (const k of new Set(j.keywords)) g.counts[k] = (g.counts[k] ?? 0) + 1;
-  };
-
-  const groups: G[] = [];
-  for (const j of [...jobs].sort((a, b) => b.keywords.length - a.keywords.length)) {
-    const set = new Set(j.keywords);
-    let best: G | null = null, bestSim = 0;
-    for (const g of groups) {
-      const s = sim(set, core(g));
-      if (s > bestSim) [best, bestSim] = [g, s];
-    }
-    if (best && bestSim >= 0.35) add(best, j);
-    else {
-      const g: G = { jobs: [], counts: {} };
-      add(g, j);
-      groups.push(g);
-    }
-  }
-
-  // Merge groups that are too alike, then the smallest ones until we're under the cap.
-  const merge = (a: G, b: G) => {
-    for (const j of b.jobs) add(a, j);
-    groups.splice(groups.indexOf(b), 1);
-  };
-  const closestPair = () => {
-    let pair: [G, G] | null = null, best = -1;
-    for (let i = 0; i < groups.length; i++)
-      for (let k = i + 1; k < groups.length; k++) {
-        const s = sim(core(groups[i]), core(groups[k]));
-        if (s > best) [pair, best] = [[groups[i], groups[k]], s];
-      }
-    return { pair, best };
-  };
-  for (let c = closestPair(); c.pair && c.best >= 0.6; c = closestPair()) merge(c.pair[0], c.pair[1]);
-  while (groups.length > maxClusters) {
-    const smallest = [...groups].sort((a, b) => a.jobs.length - b.jobs.length)[0];
-    const others = groups.filter((g) => g !== smallest);
-    const target = others.sort((a, b) => sim(core(b), core(smallest)) - sim(core(a), core(smallest)))[0];
-    merge(target, smallest);
-  }
-
-  return groups.map((g) => {
-    const size = g.jobs.length;
-    const outside = n - size;
-    const scored = Object.keys(g.counts).map((k) => {
-      const inShare = g.counts[k] / size;
-      const outShare = outside ? ((df[k] ?? 0) - g.counts[k]) / outside : 0;
-      return { k, distinct: (inShare - outShare) * (GENERIC.has(k) ? 0.3 : 1), inShare };
-    });
-    const focus = scored.filter((s) => s.distinct > 0.25).sort((a, b) => b.distinct - a.distinct).slice(0, 8).map((s) => s.k);
-    const shared = scored
-      .filter((s) => s.inShare >= 0.5 && !focus.includes(s.k))
-      .sort((a, b) => b.inShare - a.inShare)
-      .slice(0, 8)
-      .map((s) => s.k);
-    return { jobIds: g.jobs.map((j) => j.id), counts: g.counts, focus: focus.length ? focus : shared.slice(0, 5), shared };
-  });
+/** Every resume in the library against one job: most keywords covered first; ties go to your main resume. */
+export function rankResumes(jobText: string, options: ResumeOption[]): RankedResume[] {
+  return options
+    .map((option) => ({ option, match: matchKeywords(jobText, option.text) }))
+    .sort((a, b) =>
+      b.match.coverage - a.match.coverage ||
+      b.match.covered.length - a.match.covered.length ||
+      (a.option.kind === "main" ? -1 : b.option.kind === "main" ? 1 : 0));
 }
 
-/** Does a new group of jobs ask for the same things an existing version was built for? */
-export function clusterFitsVersion(cluster: KeywordCluster, versionKeywords: Record<string, number>): number {
-  const a = new Set(Object.keys(cluster.counts));
-  const b = new Set(Object.keys(versionKeywords));
-  // Too few keywords to say anything (a posting KASPR barely read): never a fit.
-  if (a.size < 3 || !b.size) return 0;
-  let inter = 0;
-  for (const k of a) if (b.has(k)) inter++;
-  return inter / new Set([...a, ...b]).size;
+/** One or two plain sentences on why the top resume is the one to use. */
+export function whyBest(ranked: RankedResume[]): string {
+  const [best, next] = ranked;
+  if (!best) return "";
+  const total = best.match.covered.length + best.match.missing.length;
+  if (total === 0) return "KASPR couldn't find specific skills in this posting to compare. Read it over yourself.";
+  let s = `Covers ${best.match.covered.length} of the ${total} skills this job asks for`;
+  if (!next) s += ".";
+  else if (best.match.coverage > next.match.coverage) {
+    const extra = best.match.covered.filter((k) => !next.match.covered.includes(k));
+    s += extra.length
+      ? `, more than ${next.option.label}. It has ${list(extra.slice(0, 3))}${extra.length > 3 ? " and more" : ""}, which ${next.option.label} doesn't.`
+      : `, the most of your resumes.`;
+  } else s += `. Your other resumes cover the same amount, so use this one.`;
+  if (best.match.coverage < VERSION_FIT) s += " None of your resumes is a strong fit yet, so this is a good one to tailor with SONNY.";
+  return s;
 }
+
+const list = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);

@@ -65,6 +65,10 @@ export interface JobContext {
   title: string;
   url: string;
   description: string;
+  /** KASPR's id for the job (Handshake id, or "pasted-<time>"), when there is one. */
+  id?: string;
+  /** What to do when this job is handed to SONNY (e.g. draft a cover letter right away). */
+  want?: "letter";
 }
 
 export interface JobLink {

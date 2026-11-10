@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { animate, stagger } from "animejs";
 import { api, errText, fmtDuration, fmtUsd } from "../lib/api";
 import { useApp } from "../lib/context";
-import { APPLICATION_STATUSES, type Application, type CoverLetter, type Resume, type Stats } from "../lib/types";
+import { APPLICATION_STATUSES, type Application, type CoverLetter, type Resume, type ResumeVersion, type Stats } from "../lib/types";
 import { KillSwitch } from "../components/KillSwitch";
 import { ResumePdf } from "../components/ResumePdf";
 
@@ -39,11 +39,12 @@ function StatCard({ label, value, format }: { label: string; value: number; form
 }
 
 export default function ControlRoom() {
-  const { notify, dataVersion, bumpData } = useApp();
+  const { notify, dataVersion, bumpData, go, setWorkshopJob } = useApp();
   const [stats, setStats] = useState<Stats | null>(null);
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [apps, setApps] = useState<Application[]>([]);
   const [letters, setLetters] = useState<CoverLetter[]>([]);
+  const [versions, setVersions] = useState<ResumeVersion[]>([]);
   const [newLabel, setNewLabel] = useState("");
   const [newText, setNewText] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -55,12 +56,13 @@ export default function ControlRoom() {
   const statsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    Promise.all([api.stats(), api.resumes(), api.applications(), api.coverLetters()])
-      .then(([s, r, a, c]) => {
+    Promise.all([api.stats(), api.resumes(), api.applications(), api.coverLetters(), api.versions()])
+      .then(([s, r, a, c, v]) => {
         setStats(s);
         setResumes(r);
         setApps(a);
         setLetters(c);
+        setVersions(v);
       })
       .catch((e) => notify({ text: errText(e), tone: "error" }));
   }, [dataVersion, notify]);
@@ -199,7 +201,7 @@ export default function ControlRoom() {
             </div>
           )}
           {resumes.length === 0 && !showAdd && (
-            <p className="text-sm text-muted">No resume yet. Upload your resume (ideally the Word .docx) so KASPR can judge which jobs fit you.</p>
+            <p className="text-sm text-muted">No resume yet. Upload your resume (ideally the Word .docx) so KASPR can tell you which resume fits each job.</p>
           )}
           <ul className="flex flex-col gap-2">
             {resumes.map((r) => (
@@ -267,6 +269,55 @@ export default function ControlRoom() {
         </section>
       </div>
 
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+      <section data-tour="sonny-resumes" className="card">
+        <h2 className="mb-4 font-semibold">Resumes made with SONNY</h2>
+        {versions.length === 0 && (
+          <p className="text-sm text-muted">Resumes SONNY tailors for you land here. Click Tailor with SONNY on any job in KASPR.</p>
+        )}
+        <ul className="flex flex-col gap-2">
+          {versions.map((v) => {
+            const base = resumes.find((r) => r.id === v.base_resume_id);
+            const err = (e: unknown) => notify({ text: errText(e), tone: "error" });
+            return (
+              <li key={v.id} id={`ver-${v.id}`} className="rounded-lg border border-line p-3">
+                <div className="flex items-center gap-2">
+                  <button className="min-w-0 flex-1 text-left" onClick={() => setOpen(open === `v${v.id}` ? null : `v${v.id}`)}>
+                    <span className="block text-sm font-medium">{v.label}</span>
+                    <span className="block text-xs text-muted">
+                      {v.created_at.slice(0, 10)}{base ? ` · from ${base.label}` : ""} · {v.applied} applied
+                    </span>
+                  </button>
+                  {v.status === "approved" ? (
+                    <span className="rounded bg-sonny/15 px-2 py-0.5 font-mono text-[10px] text-sonny">APPROVED</span>
+                  ) : (
+                    <button className="rounded bg-kaspr/15 px-2 py-0.5 font-mono text-[10px] text-kaspr" onClick={() => { setWorkshopJob(null); go("sonny"); }}>
+                      NEEDS YOUR OK
+                    </button>
+                  )}
+                  <DeleteButton what="this resume version" onConfirm={() => remove(`ver-${v.id}`, () => api.versionDelete(v.id), "Resume version deleted.")} />
+                </div>
+                {open === `v${v.id}` && (
+                  <div className="mt-3 flex flex-col gap-3">
+                    {v.summary && <p className="text-sm text-muted">{v.summary}</p>}
+                    {v.status === "approved" ? (
+                      <div className="flex gap-2">
+                        {v.has_pdf && <button className="btn text-xs" onClick={() => api.versionOpen(v.id, "pdf").catch(err)}>Open PDF</button>}
+                        <button className="btn text-xs" onClick={() => api.versionOpen(v.id, "docx").catch(err)}>Open Word file</button>
+                      </div>
+                    ) : (
+                      <button className="btn btn-primary self-start text-xs" onClick={() => { setWorkshopJob(null); go("sonny"); }}>
+                        Review the changes in SONNY
+                      </button>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
       <section className="card">
         <h2 className="mb-4 font-semibold">Cover letters</h2>
         {letters.length === 0 && <p className="text-sm text-muted">Cover letters you save from SONNY land here.</p>}
@@ -275,8 +326,8 @@ export default function ControlRoom() {
             <li key={l.id} id={`cl-${l.id}`} className="rounded-lg border border-line p-3">
               <div className="flex items-center gap-2">
                 <button className="flex-1 text-left" onClick={() => setOpen(open === `c${l.id}` ? null : `c${l.id}`)}>
-                  <span className="text-sm font-medium">{l.company}</span>
-                  <span className="ml-2 text-xs text-muted">{l.created_at}</span>
+                  <span className="block text-sm font-medium">{l.company}</span>
+                  <span className="block text-xs text-muted">{l.created_at}</span>
                 </button>
                 <DeleteButton what="this cover letter" onConfirm={() => remove(`cl-${l.id}`, () => api.coverLetterDelete(l.id), "Cover letter deleted.")} />
               </div>
@@ -287,6 +338,7 @@ export default function ControlRoom() {
           ))}
         </ul>
       </section>
+      </div>
     </div>
   );
 }

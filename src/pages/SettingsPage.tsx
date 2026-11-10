@@ -97,8 +97,7 @@ export default function SettingsPage() {
         <section className="card flex flex-col gap-4">
           <h2 className="font-semibold">Model and spending</h2>
           {([
-            ["model", "Writing model (SONNY)", "Resume suggestions and cover letters. Worth using a stronger model here.", "input_price_per_mtok", "output_price_per_mtok"],
-            ["fast_model", "Fast model (KASPR)", "Skimming and scoring jobs. A small, cheap model is plenty.", "fast_input_price_per_mtok", "fast_output_price_per_mtok"],
+            ["model", "SONNY's model", "Tailored resumes and cover letters. KASPR doesn't use AI, so he costs nothing.", "input_price_per_mtok", "output_price_per_mtok"],
           ] as const).map(([k, label, hint, inK, outK]) => (
             <div key={k} className="flex flex-col gap-2">
               <label className="label">{label}</label>
@@ -147,6 +146,9 @@ export default function SettingsPage() {
         </div>
         <button className="btn" onClick={startTour}>Take the tour</button>
       </section>
+      <p className="px-1 text-xs text-muted">
+        Lymbo is an independent project. It isn't affiliated with or endorsed by Handshake or Anthropic.
+      </p>
     </div>
   );
 }

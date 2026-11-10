@@ -84,10 +84,11 @@ pub fn run() {
             commands::handshake_connect,
             commands::handshake_approve_host,
             commands::handshake_check,
-            commands::handshake_search,
-            commands::handshake_links_on_page,
-            commands::handshake_read_job,
-            commands::handshake_open,
+            
+            
+            
+            
+            commands::handshake_watch,
             commands::handshake_disconnect,
         ])
         .run(tauri::generate_context!())

@@ -8,10 +8,9 @@ import { enter, press, wave } from "./lib/motion";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errText, fmtDuration, fmtUsd } from "./lib/api";
-import { bus } from "./lib/bus";
-import { worthTailoring } from "./lib/keywords";
-import { Ctx, KASPR_INITIAL, type AppCtx, type KasprState, type Toast } from "./lib/context";
+import { Ctx, KASPR_INITIAL, type AppCtx, type KasprState, type SeenJob, type Toast } from "./lib/context";
 import type { AgentName, JobContext, Page, SessionStatus } from "./lib/types";
 import { AgentDock } from "./components/AgentDock";
 import { Toasts } from "./components/Toasts";
@@ -24,12 +23,32 @@ const EMPTY_SESSION: SessionStatus = { active: false, elapsed_secs: 0, input_tok
 
 const NAV: { id: Page; label: string; hint: string }[] = [
   { id: "control", label: "Control Room", hint: "Library, timeline, stats" },
-  { id: "kaspr", label: "KASPR", hint: "Find & apply" },
+  { id: "kaspr", label: "KASPR", hint: "Checks jobs you open" },
   { id: "sonny", label: "SONNY", hint: "Resume workshop" },
   { id: "settings", label: "Settings", hint: "API key, limits" },
 ];
 
 let toastId = 0;
+const RELEASES = "https://github.com/Atas24/lymbo/releases/latest";
+
+// The jobs KASPR read are kept on this computer between launches (most recent 30).
+const SEEN_KEY = "lymbo.kaspr.seen";
+const MAX_SEEN = 30;
+function loadSeen(): SeenJob[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(SEEN_KEY) ?? "[]");
+    return Array.isArray(v) ? v.slice(0, MAX_SEEN) : [];
+  } catch {
+    return [];
+  }
+}
+function saveSeen(seen: SeenJob[]) {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    /* storage full or blocked: the list just won't survive a restart */
+  }
+}
 
 export default function App() {
   const [page, setPage] = useState<Page>("control");
@@ -60,13 +79,14 @@ export default function App() {
   const [busy, setBusySet] = useState<Set<AgentName>>(new Set());
   const [workshopJob, setWorkshopJob] = useState<JobContext | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
-  const [location, setLocation] = useState<{ text: string; summary: string } | null>(null);
-  const [kaspr, setKasprState] = useState<KasprState>(KASPR_INITIAL);
+  const [kaspr, setKasprState] = useState<KasprState>(() => ({ ...KASPR_INITIAL, seen: loadSeen() }));
   const setKaspr = useCallback((patch: Partial<KasprState>) => setKasprState((k) => ({ ...k, ...patch })), []);
-  const updateJobs = useCallback(
-    (fn: (jobs: KasprState["jobs"]) => KasprState["jobs"]) => setKasprState((k) => ({ ...k, jobs: fn(k.jobs) })),
-    [],
-  );
+  const addSeen = useCallback((j: SeenJob) => setKasprState((k) => ({ ...k, seen: [j, ...k.seen.filter((x) => x.id !== j.id)].slice(0, MAX_SEEN) })), []);
+  useEffect(() => saveSeen(kaspr.seen), [kaspr.seen]);
+  const kasprRef = useRef(kaspr);
+  kasprRef.current = kaspr;
+  const pageNow = useRef(page);
+  pageNow.current = page;
 
   const notify = useCallback((t: Omit<Toast, "id">) => setToasts((ts) => [...ts, { ...t, id: ++toastId }]), []);
   const setBusy = useCallback((agent: AgentName, on: boolean) => {
@@ -98,8 +118,7 @@ export default function App() {
   const killSession = useCallback(async () => {
     setSession(await api.sessionKill());
     setBusySet(new Set());
-    setLocation(null); // KASPR asks again next session
-    setKasprState(KASPR_INITIAL); // the kill switch also closes KASPR's Chrome window
+    setKasprState((k) => ({ ...KASPR_INITIAL, seen: k.seen })); // the kill switch also closes KASPR's Chrome window
     setDataVersion((v) => v + 1);
     notify({ text: "Session ended. Agents are stopped." });
   }, [notify]);
@@ -125,8 +144,13 @@ export default function App() {
               try {
                 await update.downloadAndInstall();
                 await relaunch();
-              } catch (e) {
-                notify({ text: `Update failed: ${errText(e)}`, tone: "error" });
+              } catch {
+                // macOS can block an app from replacing itself; the download page always works.
+                notify({
+                  text: `Lymbo couldn't install ${update.version} by itself. Download it and drag it into Applications (choose Replace). Your data stays.`,
+                  tone: "error",
+                  action: { label: "Download it", run: () => openUrl(RELEASES).catch(() => {}) },
+                });
               }
             },
           },
@@ -142,46 +166,49 @@ export default function App() {
     return () => clearInterval(id);
   }, [session.active, refreshSession]);
 
-  // SONNY listens for jobs KASPR recommends, and pipes up if the resume needs work.
-  useEffect(
-    () =>
-      bus.subscribe(async (msg) => {
-        if (msg.type !== "job.recommended") return;
-        setBusy("SONNY", true);
+  // KASPR watches the Chrome window: whenever you open a job on Handshake, he reads it.
+  // He only reads what's already on your screen; he never clicks or browses on his own.
+  useEffect(() => {
+    if (!session.active || kaspr.conn !== "on") return;
+    let stop = false;
+    (async () => {
+      while (!stop) {
         try {
-          // The keyword check already ran locally, so SONNY decides without an AI call.
-          const m = msg.match;
-          const review = {
-            verdict: (worthTailoring(m) ? "workshop" : "good") as "workshop" | "good",
-            missing: m.missing,
-            summary: m.missing.length
-              ? `your resume covers ${m.covered.length} of ${m.covered.length + m.missing.length} keywords. Missing: ${m.missing.slice(0, 4).join(", ")}.`
-              : "",
-          };
-          const total = m.covered.length + m.missing.length;
-          bus.publish({
-            type: "alignment.result", from: "SONNY", to: "USER", job: msg.job,
-            verdict: review.verdict, summary: review.summary, missing: review.missing,
-          });
-          notify({
-            from: "SONNY",
-            text:
-              review.verdict === "workshop"
-                ? `Before you apply to ${msg.job.company}: ${review.summary}`
-                : `Your resume lines up well with ${msg.job.title} at ${msg.job.company}${total ? ` (${m.covered.length} of ${total} keywords)` : ""}.`,
-            action:
-              review.verdict === "workshop"
-                ? { label: "Workshop it", run: () => { setWorkshopJob(msg.job); setPage("sonny"); } }
-                : undefined,
-          });
+          const known = kasprRef.current.seen.map((j) => j.id);
+          const w = await api.hsWatch(known);
+          if (stop) break;
+          if (w.page && w.id) {
+            const p = w.page;
+            const job = { title: p.title || "Untitled job", company: p.company, url: p.url, description: p.text };
+            addSeen({ id: w.id, job, seenAt: Date.now() });
+            if (pageNow.current !== "kaspr") {
+              notify({
+                from: "KASPR",
+                text: `I read ${job.title}${job.company ? ` at ${job.company}` : ""}.`,
+                action: { label: "See which resume to use", run: () => setPage("kaspr") },
+              });
+            }
+          }
+          if (w.id !== kasprRef.current.onScreen) {
+            // a newly opened job takes over the screen, even if you'd picked an older one
+            setKaspr(w.id ? { onScreen: w.id, pinned: null } : { onScreen: null });
+          }
         } catch (e) {
-          notify({ from: "SONNY", text: errText(e), tone: "error" });
-        } finally {
-          setBusy("SONNY", false);
+          if (stop) break;
+          const msg = errText(e);
+          if (/signed you out|isn't connected|Start a session|Session ended/i.test(msg)) {
+            setKaspr({ conn: "off", connMsg: "", onScreen: null });
+            if (/isn't connected/i.test(msg)) notify({ from: "KASPR", text: "The Handshake window closed. Click Connect to open it again.", tone: "error" });
+            break;
+          }
         }
-      }),
-    [notify, setBusy],
-  );
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [session.active, kaspr.conn, addSeen, notify, setKaspr]);
 
   const visible = useMemo(() => {
     const v = new Set<AgentName>(busy);
@@ -191,9 +218,9 @@ export default function App() {
   }, [page, busy]);
 
   const ctx: AppCtx = {
-    kaspr, setKaspr, updateJobs, startTour,
+    kaspr, setKaspr, addSeen, startTour,
     session, refreshSession, startSession, killSession, hasKey, refreshKey, notify, setBusy,
-    go: setPage, workshopJob, setWorkshopJob, location, setLocation, dataVersion, bumpData: () => setDataVersion((v) => v + 1),
+    go: setPage, workshopJob, setWorkshopJob, dataVersion, bumpData: () => setDataVersion((v) => v + 1),
   };
 
   return (
